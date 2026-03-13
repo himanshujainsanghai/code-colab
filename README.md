@@ -70,3 +70,13 @@ npm run dev
 ```
 
 Create `.env` files from each `.env.example` before running.
+
+## Render Deployment Note (Backend)
+
+For Render backend builds, use this exact build command:
+
+```bash
+npm install --include=dev && npm run build
+```
+
+Do not use only `npm run build` on Render, because TypeScript build tooling is in dev dependencies and must be installed during build.

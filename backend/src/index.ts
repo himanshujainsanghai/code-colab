@@ -10,10 +10,14 @@ async function bootstrap() {
   await connectDb();
   await startCollabServer();
 
+  const allowedOrigins = Array.from(
+    new Set([env.CLIENT_ORIGIN, ...env.CORS_ALLOWED_ORIGINS]),
+  );
+
   const server = http.createServer(app);
   const io = new SocketIOServer(server, {
     cors: {
-      origin: env.CLIENT_ORIGIN,
+      origin: allowedOrigins,
       credentials: true,
     },
   });

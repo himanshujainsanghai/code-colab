@@ -14,11 +14,24 @@ import { userRouter } from "./routes/user.routes.js";
 
 export const app = express();
 
+const allowedOrigins = Array.from(
+  new Set([env.CLIENT_ORIGIN, ...env.CORS_ALLOWED_ORIGINS]),
+);
+
 app.use(helmet());
 app.use(
   cors({
-    origin: env.CLIENT_ORIGIN,
+    origin(origin, callback) {
+      if (!origin) return callback(null, true);
+      const normalized = origin.replace(/\/$/, "");
+      if (allowedOrigins.includes(normalized)) {
+        return callback(null, true);
+      }
+      return callback(new Error("Origin not allowed by CORS"), false);
+    },
     credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   }),
 );
 app.use(express.json({ limit: "2mb" }));

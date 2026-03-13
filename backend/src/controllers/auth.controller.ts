@@ -30,32 +30,32 @@ const resetSchema = z.object({
 
 const refreshTtlMs = 7 * 24 * 60 * 60 * 1000;
 const resetTokenTtlMs = 15 * 60 * 1000;
+const accessTtlMs = 15 * 60 * 1000;
+
+function authCookieOptions(maxAge: number) {
+  return {
+    httpOnly: true,
+    sameSite: env.COOKIE_SAME_SITE,
+    secure: env.COOKIE_SECURE,
+    maxAge,
+  } as const;
+}
 
 function setAuthCookies(response: Response, accessToken: string, refreshToken: string) {
-  response.cookie("accessToken", accessToken, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: env.NODE_ENV === "production",
-    maxAge: 15 * 60 * 1000,
-  });
-  response.cookie("refreshToken", refreshToken, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: env.NODE_ENV === "production",
-    maxAge: refreshTtlMs,
-  });
+  response.cookie("accessToken", accessToken, authCookieOptions(accessTtlMs));
+  response.cookie("refreshToken", refreshToken, authCookieOptions(refreshTtlMs));
 }
 
 function clearAuthCookies(response: Response) {
   response.clearCookie("accessToken", {
     httpOnly: true,
-    sameSite: "lax",
-    secure: env.NODE_ENV === "production",
+    sameSite: env.COOKIE_SAME_SITE,
+    secure: env.COOKIE_SECURE,
   });
   response.clearCookie("refreshToken", {
     httpOnly: true,
-    sameSite: "lax",
-    secure: env.NODE_ENV === "production",
+    sameSite: env.COOKIE_SAME_SITE,
+    secure: env.COOKIE_SECURE,
   });
 }
 

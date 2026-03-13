@@ -10,6 +10,23 @@ function required(name: string, fallback?: string): string {
   return value;
 }
 
+function parseOrigins(value?: string) {
+  if (!value) return [];
+  return value
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+    .map((origin) => origin.replace(/\/$/, ""));
+}
+
+function normalizeSameSite(value?: string): "lax" | "strict" | "none" {
+  const normalized = (value ?? "").toLowerCase();
+  if (normalized === "none" || normalized === "strict" || normalized === "lax") {
+    return normalized;
+  }
+  return "lax";
+}
+
 export const env = {
   NODE_ENV: process.env.NODE_ENV ?? "development",
   PORT: Number(process.env.PORT ?? 4000),
@@ -18,7 +35,14 @@ export const env = {
   JWT_REFRESH_SECRET: required("JWT_REFRESH_SECRET", "dev-refresh-secret"),
   ACCESS_TOKEN_TTL: process.env.ACCESS_TOKEN_TTL ?? "15m",
   REFRESH_TOKEN_TTL: process.env.REFRESH_TOKEN_TTL ?? "7d",
-  CLIENT_ORIGIN: process.env.CLIENT_ORIGIN ?? "http://localhost:5173",
+  CLIENT_ORIGIN: (process.env.CLIENT_ORIGIN ?? "http://localhost:5173").replace(/\/$/, ""),
+  CORS_ALLOWED_ORIGINS: parseOrigins(process.env.CORS_ALLOWED_ORIGINS),
+  COOKIE_SAME_SITE: normalizeSameSite(
+    process.env.COOKIE_SAME_SITE ?? (process.env.NODE_ENV === "production" ? "none" : "lax"),
+  ),
+  COOKIE_SECURE: process.env.COOKIE_SECURE
+    ? process.env.COOKIE_SECURE === "true"
+    : process.env.NODE_ENV === "production",
   JUDGE0_URL: process.env.JUDGE0_URL ?? "http://localhost:2358",
   JUDGE0_KEY: process.env.JUDGE0_KEY,
   SMTP_HOST: process.env.SMTP_HOST,
