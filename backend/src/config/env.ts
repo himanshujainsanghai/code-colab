@@ -27,22 +27,36 @@ function normalizeSameSite(value?: string): "lax" | "strict" | "none" {
   return "lax";
 }
 
+const nodeEnv = process.env.NODE_ENV ?? "development";
+const clientOriginEntries = parseOrigins(process.env.CLIENT_ORIGIN ?? "http://localhost:5173");
+const clientOrigin = clientOriginEntries[0] ?? "http://localhost:5173";
+const configuredExtraOrigins = parseOrigins(process.env.CORS_ALLOWED_ORIGINS);
+const mergedAllowedOrigins = Array.from(
+  new Set([...configuredExtraOrigins, ...clientOriginEntries.slice(1)]),
+);
+const configuredSameSite = normalizeSameSite(
+  process.env.COOKIE_SAME_SITE ?? (nodeEnv === "production" ? "none" : "lax"),
+);
+const configuredSecure = process.env.COOKIE_SECURE
+  ? process.env.COOKIE_SECURE === "true"
+  : nodeEnv === "production";
+const authCookieSameSite = nodeEnv === "production" ? "none" : configuredSameSite;
+const authCookieSecure = nodeEnv === "production" ? true : configuredSecure;
+
 export const env = {
-  NODE_ENV: process.env.NODE_ENV ?? "development",
+  NODE_ENV: nodeEnv,
   PORT: Number(process.env.PORT ?? 4000),
   MONGO_URI: required("MONGO_URI", "mongodb://127.0.0.1:27017/multicoder"),
   JWT_ACCESS_SECRET: required("JWT_ACCESS_SECRET", "dev-access-secret"),
   JWT_REFRESH_SECRET: required("JWT_REFRESH_SECRET", "dev-refresh-secret"),
   ACCESS_TOKEN_TTL: process.env.ACCESS_TOKEN_TTL ?? "15m",
   REFRESH_TOKEN_TTL: process.env.REFRESH_TOKEN_TTL ?? "7d",
-  CLIENT_ORIGIN: (process.env.CLIENT_ORIGIN ?? "http://localhost:5173").replace(/\/$/, ""),
-  CORS_ALLOWED_ORIGINS: parseOrigins(process.env.CORS_ALLOWED_ORIGINS),
-  COOKIE_SAME_SITE: normalizeSameSite(
-    process.env.COOKIE_SAME_SITE ?? (process.env.NODE_ENV === "production" ? "none" : "lax"),
-  ),
-  COOKIE_SECURE: process.env.COOKIE_SECURE
-    ? process.env.COOKIE_SECURE === "true"
-    : process.env.NODE_ENV === "production",
+  CLIENT_ORIGIN: clientOrigin,
+  CORS_ALLOWED_ORIGINS: mergedAllowedOrigins,
+  COOKIE_SAME_SITE: configuredSameSite,
+  COOKIE_SECURE: configuredSecure,
+  AUTH_COOKIE_SAME_SITE: authCookieSameSite,
+  AUTH_COOKIE_SECURE: authCookieSecure,
   JUDGE0_URL: process.env.JUDGE0_URL ?? "http://localhost:2358",
   JUDGE0_KEY: process.env.JUDGE0_KEY,
   SMTP_HOST: process.env.SMTP_HOST,

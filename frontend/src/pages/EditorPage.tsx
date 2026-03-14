@@ -308,6 +308,11 @@ export function EditorPage() {
     provider.setAwarenessField("cursorColor", color);
 
     const yText = doc.getText("monaco");
+    // Prevent brief empty-doc overwrite on initial bind.
+    // If room cache/server doc is empty, seed local Yjs text from current file content first.
+    if (yText.length === 0 && initialValue.length > 0) {
+      yText.insert(0, initialValue);
+    }
     const binding = new MonacoBinding(yText, model, new Set([editor]), provider.awareness);
     collabRef.current = { provider, doc, binding };
 

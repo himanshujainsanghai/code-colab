@@ -31,12 +31,13 @@ const resetSchema = z.object({
 const refreshTtlMs = 7 * 24 * 60 * 60 * 1000;
 const resetTokenTtlMs = 15 * 60 * 1000;
 const accessTtlMs = 15 * 60 * 1000;
+const mailTimeoutMs = 8000;
 
 function authCookieOptions(maxAge: number) {
   return {
     httpOnly: true,
-    sameSite: env.COOKIE_SAME_SITE,
-    secure: env.COOKIE_SECURE,
+    sameSite: env.AUTH_COOKIE_SAME_SITE,
+    secure: env.AUTH_COOKIE_SECURE,
     maxAge,
   } as const;
 }
@@ -49,13 +50,13 @@ function setAuthCookies(response: Response, accessToken: string, refreshToken: s
 function clearAuthCookies(response: Response) {
   response.clearCookie("accessToken", {
     httpOnly: true,
-    sameSite: env.COOKIE_SAME_SITE,
-    secure: env.COOKIE_SECURE,
+    sameSite: env.AUTH_COOKIE_SAME_SITE,
+    secure: env.AUTH_COOKIE_SECURE,
   });
   response.clearCookie("refreshToken", {
     httpOnly: true,
-    sameSite: env.COOKIE_SAME_SITE,
-    secure: env.COOKIE_SECURE,
+    sameSite: env.AUTH_COOKIE_SAME_SITE,
+    secure: env.AUTH_COOKIE_SECURE,
   });
 }
 
@@ -198,7 +199,16 @@ export async function forgotPassword(request: Request, response: Response) {
     user.resetPasswordExpiresAt = new Date(Date.now() + resetTokenTtlMs);
     await user.save();
     const resetLink = `${env.CLIENT_ORIGIN}/reset-password?token=${token}`;
-    await sendResetPasswordMail(user.email, resetLink);
+    try {
+      await Promise.race([
+        sendResetPasswordMail(user.email, resetLink),
+        new Promise((_, reject) => {
+          setTimeout(() => reject(new Error("Mail send timed out")), mailTimeoutMs);
+        }),
+      ]);
+    } catch {
+      // Keep response generic and non-blocking even if mail provider is slow/failing.
+    }
   }
   return response.json({ message: "If an account exists, a reset link has been sent." });
 }

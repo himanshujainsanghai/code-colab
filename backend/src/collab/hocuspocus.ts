@@ -60,21 +60,23 @@ export async function startCollabServer() {
     maxDebounce: 30_000,
     async onLoadDocument({ documentName, document }) {
       const fileId = decodeFileId(documentName);
+      const file = await FileNode.findById(fileId).lean();
+      const persistedContent = file?.content ?? "";
 
       if (redisReady) {
         const cachedState = await redis.get(getCacheKey(documentName));
         if (cachedState) {
-          Y.applyUpdate(document, Buffer.from(cachedState, "base64"));
-          return document;
+          try {
+            Y.applyUpdate(document, Buffer.from(cachedState, "base64"));
+          } catch {
+            // Ignore corrupt cache and fall back to persisted Mongo content.
+          }
         }
       }
 
-      const file = await FileNode.findById(fileId).lean();
-      if (file?.content) {
-        const yText = document.getText("monaco");
-        if (yText.length === 0) {
-          yText.insert(0, file.content);
-        }
+      const yText = document.getText("monaco");
+      if (yText.length === 0 && persistedContent.length > 0) {
+        yText.insert(0, persistedContent);
       }
       return document;
     },
