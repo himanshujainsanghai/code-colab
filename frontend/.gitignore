@@ -12,6 +12,13 @@ dist
 dist-ssr
 *.local
 
+# Local env — never commit secrets
+.env
+.env.local
+.env.*.local
+# .env.production is intentionally committed (no secrets, just public API URLs)
+# so Vercel picks it up during build without needing dashboard env vars
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
