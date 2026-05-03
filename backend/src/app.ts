@@ -38,7 +38,16 @@ app.use(express.json({ limit: "2mb" }));
 app.use(cookieParser());
 app.use(morgan("dev"));
 
-app.get("/health", (_request, response) => response.json({ ok: true }));
+app.get("/health", (_request, response) =>
+  response.json({
+    ok: true,
+    env: env.NODE_ENV,
+    clientOrigin: env.CLIENT_ORIGIN,
+    allowedOrigins: Array.from(new Set([env.CLIENT_ORIGIN, ...env.CORS_ALLOWED_ORIGINS])),
+    cookieSameSite: env.AUTH_COOKIE_SAME_SITE,
+    cookieSecure: env.AUTH_COOKIE_SECURE,
+  }),
+);
 
 app.use("/api/auth", authRouter);
 app.use("/api/users", userRouter);

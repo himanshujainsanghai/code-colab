@@ -34,10 +34,17 @@ async function bootstrap() {
   setSocketServer(io);
 
   server.listen(env.PORT, () => {
+    const origins = Array.from(new Set([env.CLIENT_ORIGIN, ...env.CORS_ALLOWED_ORIGINS]));
     // eslint-disable-next-line no-console
     console.log(`API server running on http://localhost:${env.PORT}`);
     // eslint-disable-next-line no-console
     console.log(`Collab server running on ws://localhost:${env.COLLAB_PORT}`);
+    // eslint-disable-next-line no-console
+    console.log(`[cors] allowed origins: ${origins.join(", ")}`);
+    // eslint-disable-next-line no-console
+    console.log(
+      `[cookies] SameSite=${env.AUTH_COOKIE_SAME_SITE} Secure=${env.AUTH_COOKIE_SECURE}`,
+    );
   });
 }
 

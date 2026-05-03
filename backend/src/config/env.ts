@@ -28,20 +28,38 @@ function normalizeSameSite(value?: string): "lax" | "strict" | "none" {
 }
 
 const nodeEnv = process.env.NODE_ENV ?? "development";
+
+// ---------------------------------------------------------------------------
+// Cookie strategy
+// ---------------------------------------------------------------------------
+// When the frontend (Vercel) and backend (Render) are on different origins,
+// the auth cookies MUST be:
+//   SameSite=None; Secure
+// regardless of NODE_ENV — because "None" is required for any cross-site
+// cookie, and "Secure" is required by the browser whenever SameSite=None.
+//
+// We detect "cross-origin deployment" via the CROSS_ORIGIN_COOKIES env var,
+// which you set to "true" in the Render dashboard.  Locally it stays unset
+// so you still get the developer-friendly Lax/non-secure defaults.
+// ---------------------------------------------------------------------------
+const crossOriginCookies =
+  process.env.CROSS_ORIGIN_COOKIES === "true" || nodeEnv === "production";
+
 const clientOriginEntries = parseOrigins(process.env.CLIENT_ORIGIN ?? "http://localhost:5173");
 const clientOrigin = clientOriginEntries[0] ?? "http://localhost:5173";
 const configuredExtraOrigins = parseOrigins(process.env.CORS_ALLOWED_ORIGINS);
 const mergedAllowedOrigins = Array.from(
   new Set([...configuredExtraOrigins, ...clientOriginEntries.slice(1)]),
 );
-const configuredSameSite = normalizeSameSite(
-  process.env.COOKIE_SAME_SITE ?? (nodeEnv === "production" ? "none" : "lax"),
-);
-const configuredSecure = process.env.COOKIE_SECURE
-  ? process.env.COOKIE_SECURE === "true"
-  : nodeEnv === "production";
-const authCookieSameSite = nodeEnv === "production" ? "none" : configuredSameSite;
-const authCookieSecure = nodeEnv === "production" ? true : configuredSecure;
+
+// SameSite / Secure for auth cookies
+const authCookieSameSite: "none" | "lax" | "strict" = crossOriginCookies
+  ? "none"   // required for cross-origin cookie delivery
+  : normalizeSameSite(process.env.COOKIE_SAME_SITE ?? "lax");
+
+const authCookieSecure: boolean = crossOriginCookies
+  ? true     // SameSite=None is only allowed on Secure cookies
+  : (process.env.COOKIE_SECURE ? process.env.COOKIE_SECURE === "true" : false);
 
 export const env = {
   NODE_ENV: nodeEnv,
@@ -53,14 +71,13 @@ export const env = {
   REFRESH_TOKEN_TTL: process.env.REFRESH_TOKEN_TTL ?? "7d",
   CLIENT_ORIGIN: clientOrigin,
   CORS_ALLOWED_ORIGINS: mergedAllowedOrigins,
-  COOKIE_SAME_SITE: configuredSameSite,
-  COOKIE_SECURE: configuredSecure,
+  // Expose for debugging (e.g. health endpoint)
   AUTH_COOKIE_SAME_SITE: authCookieSameSite,
   AUTH_COOKIE_SECURE: authCookieSecure,
   JUDGE0_URL: process.env.JUDGE0_URL ?? "http://localhost:2358",
   JUDGE0_KEY: process.env.JUDGE0_KEY,
   SMTP_HOST: process.env.SMTP_HOST,
-  SMTP_PORT: Number(process.env.SMTP_PORT ?? 587),
+  SMTP_PORT: Number(process.env.SMTP_PORT ?? 465),
   SMTP_USER: process.env.SMTP_USER,
   SMTP_PASS: process.env.SMTP_PASS,
   REDIS_URL: process.env.REDIS_URL ?? "redis://127.0.0.1:6379",
