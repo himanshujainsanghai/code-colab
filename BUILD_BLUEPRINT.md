@@ -1,4 +1,4 @@
-# MultiCoder Build Blueprint
+# Colab Code Build Blueprint
 
 ## 1) System Lens
 

@@ -109,8 +109,9 @@ function updateFileContent(
 }
 
 export function EditorPage() {
-  const { projectId = "multicoder" } = useParams();
+  const { projectId = "colab-code" } = useParams();
   const { user } = useAuth();
+  const [project, setProject] = useState<{ _id: string; name: string } | null>(null);
   const [fileTree, setFileTree] = useState<FileNode[]>([]);
   const files = useMemo(() => flattenFiles(fileTree), [fileTree]);
   const [openFileIds, setOpenFileIds] = useState<string[]>([]);
@@ -195,6 +196,16 @@ export function EditorPage() {
     }
   }, [projectId]);
 
+  const loadProject = useCallback(async () => {
+    if (!projectId) return;
+    try {
+      const response = await api.get(`/projects/${projectId}`);
+      setProject(response.data.data);
+    } catch {
+      // Ignored
+    }
+  }, [projectId]);
+
   const loadMembers = useCallback(async () => {
     if (!projectId) return;
     try {
@@ -216,6 +227,10 @@ export function EditorPage() {
   useEffect(() => {
     void loadFileTree();
   }, [loadFileTree]);
+
+  useEffect(() => {
+    void loadProject();
+  }, [loadProject]);
 
   useEffect(() => {
     void loadMembers();
@@ -457,7 +472,7 @@ export function EditorPage() {
       onSave={onSave}
       openFileIds={openFileIds}
       collaborators={members}
-      projectName={projectId}
+      projectName={project?.name || projectId}
       runResult={runResult}
       running={running}
       setFileContent={onEditorChange}

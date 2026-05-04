@@ -1,12 +1,14 @@
 import type { ReactNode } from "react";
 import { Navigate } from "react-router-dom";
 import { useAuth } from "../../lib/auth";
+import { Navbar } from "../layout/Navbar";
 
 interface ProtectedRouteProps {
   children: ReactNode;
+  hideNavbar?: boolean;
 }
 
-export function ProtectedRoute({ children }: ProtectedRouteProps) {
+export function ProtectedRoute({ children, hideNavbar }: ProtectedRouteProps) {
   const { isAuthenticated, loading } = useAuth();
 
   if (loading) {
@@ -21,5 +23,12 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
     return <Navigate replace to="/login" />;
   }
 
-  return <>{children}</>;
+  return (
+    <div className="flex min-h-screen flex-col">
+      {!hideNavbar && <Navbar />}
+      <div className="flex-1 flex flex-col">
+        {children}
+      </div>
+    </div>
+  );
 }

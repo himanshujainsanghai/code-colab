@@ -15,7 +15,7 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "MultiCoder backend service",
+  "description": "Colab Code backend service",
   "dependencies": {
     "@hocuspocus/server": "^3.4.4",
     "axios": "^1.13.6",

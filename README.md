@@ -1,4 +1,4 @@
-# MultiCoder
+# Colab Code
 
 A VS Code-style collaborative web IDE with:
 - React + Vite + Monaco frontend

@@ -39,7 +39,7 @@ export default function App() {
         <Route
           path="/project/:projectId"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute hideNavbar>
               <EditorPage />
             </ProtectedRoute>
           }

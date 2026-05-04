@@ -43,11 +43,11 @@ export async function sendResetPasswordMail(to: string, resetLink: string) {
   }
 
   await transporter.sendMail({
-    from: `"MultiCoder" <${env.SMTP_USER}>`,
+    from: `"Colab Code" <${env.SMTP_USER}>`,
     to,
-    subject: "Reset your MultiCoder password",
+    subject: "Reset your Colab Code password",
     html: `
-      <p>You requested a password reset for your MultiCoder account.</p>
+      <p>You requested a password reset for your Colab Code account.</p>
       <p>
         <a href="${resetLink}" style="display:inline-block;padding:10px 20px;background:#007acc;color:#fff;text-decoration:none;border-radius:6px;">
           Reset Password

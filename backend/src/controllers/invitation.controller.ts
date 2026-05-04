@@ -9,7 +9,7 @@ import { User } from "../models/User.js";
 import { sendInvitationMail } from "../services/mail.service.js";
 
 const createInvitationSchema = z.object({
-  invitedEmail: z.string().email(),
+  userId: z.string(),
   role: z.enum(["viewer", "editor", "admin"]).default("viewer"),
 });
 
@@ -25,12 +25,11 @@ export async function createInvitation(request: Request, response: Response) {
   const input = createInvitationSchema.parse(request.body);
   const projectId = request.params.id;
   const inviterId = request.user!.userId;
-  const invitedEmail = normalizeEmail(input.invitedEmail);
 
   const [project, inviter, invitedUser] = await Promise.all([
     Project.findById(projectId).select("_id name ownerId").lean(),
     User.findById(inviterId).select("_id username email").lean(),
-    User.findOne({ email: invitedEmail }).select("_id email").lean(),
+    User.findById(input.userId).select("_id email username").lean(),
   ]);
 
   if (!project) {
@@ -39,13 +38,16 @@ export async function createInvitation(request: Request, response: Response) {
   if (!inviter) {
     return response.status(404).json({ message: "Inviter not found" });
   }
+  if (!invitedUser) {
+    return response.status(404).json({ message: "User not found in the system. You can only invite registered users." });
+  }
+
+  const invitedEmail = normalizeEmail(invitedUser.email);
   if (normalizeEmail(inviter.email) === invitedEmail) {
     return response.status(400).json({ message: "You cannot invite yourself." });
   }
 
-  const existingCollab = invitedUser
-    ? await Collaborator.findOne({ projectId, userId: invitedUser._id }).lean()
-    : null;
+  const existingCollab = await Collaborator.findOne({ projectId, userId: invitedUser._id }).lean();
   if (existingCollab) {
     return response.status(409).json({ message: "User is already a collaborator." });
   }

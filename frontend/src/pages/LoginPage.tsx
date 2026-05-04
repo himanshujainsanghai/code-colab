@@ -2,6 +2,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { AxiosError } from "axios";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
+import { Eye, EyeOff } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { z } from "zod";
 import { AuthCard } from "../components/auth/AuthCard";
@@ -20,6 +21,7 @@ export function LoginPage() {
   const [searchParams] = useSearchParams();
   const { login } = useAuth();
   const [serverError, setServerError] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
   const {
     register,
     handleSubmit,
@@ -60,12 +62,21 @@ export function LoginPage() {
           </div>
           <div>
             <label className="mb-1 block text-sm text-vscode-muted">Password</label>
-            <input
-              className="w-full rounded-md border border-vscode-border bg-[#1e1e1e] px-3 py-2 text-sm outline-none focus:shadow-glow"
-              placeholder="••••••••"
-              type="password"
-              {...register("password")}
-            />
+            <div className="relative">
+              <input
+                className="w-full rounded-md border border-vscode-border bg-[#1e1e1e] py-2 pl-3 pr-10 text-sm outline-none focus:shadow-glow"
+                placeholder="••••••••"
+                type={showPassword ? "text" : "password"}
+                {...register("password")}
+              />
+              <button
+                type="button"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-vscode-muted hover:text-white"
+                onClick={() => setShowPassword(!showPassword)}
+              >
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
             {errors.password && <p className="mt-1 text-xs text-red-400">Password must be at least 6 characters.</p>}
           </div>
           <button

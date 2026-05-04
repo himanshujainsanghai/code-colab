@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import type { FileNode, RunResult } from "../../lib/types";
 
 interface EditorShellProps {
@@ -143,6 +144,7 @@ export function EditorShell({
   language,
   onEditorMount,
 }: EditorShellProps) {
+  const navigate = useNavigate();
   const files = useMemo(() => flattenFiles(fileTree), [fileTree]);
   const folderIds = useMemo(() => {
     const visit = (nodes: FileNode[]): string[] =>
@@ -159,6 +161,8 @@ export function EditorShell({
   >([{ id: "terminal-1", name: "bash 1" }]);
   const [activeTerminalId, setActiveTerminalId] = useState("terminal-1");
   const [showSidebar, setShowSidebar] = useState(true);
+  const [activeSidebarTab, setActiveSidebarTab] = useState<"explorer" | "search">("explorer");
+  const [searchQuery, setSearchQuery] = useState("");
   const [showTerminal, setShowTerminal] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [uiMessage, setUiMessage] = useState("");
@@ -174,6 +178,26 @@ export function EditorShell({
     }, {});
     setExpandedFolders(collapsed);
   };
+  
+  const searchResults = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+    const query = searchQuery.toLowerCase();
+    const results: Array<{ file: FileNode; line: number; content: string; matchType: "name" | "content" }> = [];
+    files.forEach((file) => {
+      if (file.name.toLowerCase().includes(query)) {
+        results.push({ file, line: 0, content: file.name, matchType: "name" });
+      }
+      if (file.content) {
+        const lines = file.content.split("\n");
+        lines.forEach((lineContent, index) => {
+          if (lineContent.toLowerCase().includes(query)) {
+            results.push({ file, line: index + 1, content: lineContent.trim(), matchType: "content" });
+          }
+        });
+      }
+    });
+    return results;
+  }, [files, searchQuery]);
   const addTerminal = () => {
     const id = `terminal-${Date.now()}`;
     const next = [...terminals, { id, name: `bash ${terminals.length + 1}` }];
@@ -234,20 +258,20 @@ export function EditorShell({
     }
   }, [notify, onSave]);
   const quickOpenFile = useCallback(() => {
-    const query = window.prompt("Quick open file name");
-    if (!query) return;
-    const matched = files.find((file) =>
-      file.name.toLowerCase().includes(query.trim().toLowerCase()),
-    );
-    if (matched) {
-      onOpenFile(matched.id);
-      notify(`Opened ${matched.name}`);
-      return;
-    }
-    notify("No matching file found");
-  }, [files, notify, onOpenFile]);
+    setShowSidebar(true);
+    setActiveSidebarTab("search");
+    setTimeout(() => {
+      document.getElementById("workspace-search-input")?.focus();
+    }, 100);
+  }, []);
   const handleMenuAction = async (item: string) => {
     switch (item) {
+      case "Dashboard":
+        navigate("/dashboard");
+        break;
+      case "Profile":
+        navigate("/profile");
+        break;
       case "File":
         await saveCurrentFile();
         break;
@@ -285,6 +309,8 @@ export function EditorShell({
     }
   };
   const menuItems = [
+    "Dashboard",
+    "Profile",
     "File",
     "Edit",
     "Selection",
@@ -335,7 +361,7 @@ export function EditorShell({
           ))}
         </div>
         <div className="text-xs text-vscode-muted">
-          {projectName} - MultiCoder
+          {projectName} - Colab Code
         </div>
         <div className="flex items-center gap-2 text-vscode-muted">
           <button className="rounded p-0.5 hover:bg-[#2a2d2e]" onClick={minimizeWorkspace} title="Minimize workspace" type="button">
@@ -421,20 +447,20 @@ export function EditorShell({
                 <Panel defaultSize="54px" maxSize="54px" minSize="54px">
                   <aside className="flex h-full flex-col items-center gap-4 border-r border-vscode-border bg-[#181818] py-3">
                     <button
-                      className="rounded p-1 hover:bg-[#2a2d2e]"
-                      onClick={() => setShowSidebar((prev) => !prev)}
-                      title="Files"
+                      className={`rounded p-1 ${activeSidebarTab === "explorer" ? "text-white" : "text-vscode-muted hover:bg-[#2a2d2e]"}`}
+                      onClick={() => { setShowSidebar(true); setActiveSidebarTab("explorer"); }}
+                      title="Explorer"
                       type="button"
                     >
-                      <FileCode className="h-5 w-5 text-vscode-blue" />
+                      <FileCode className="h-6 w-6" />
                     </button>
                     <button
-                      className="rounded p-1 hover:bg-[#2a2d2e]"
-                      onClick={quickOpenFile}
-                      title="Search files"
+                      className={`rounded p-1 ${activeSidebarTab === "search" ? "text-white" : "text-vscode-muted hover:bg-[#2a2d2e]"}`}
+                      onClick={() => { setShowSidebar(true); setActiveSidebarTab("search"); }}
+                      title="Search"
                       type="button"
                     >
-                      <Search className="h-5 w-5 text-vscode-muted" />
+                      <Search className="h-6 w-6" />
                     </button>
                     <button
                       className="rounded p-1 hover:bg-[#2a2d2e]"
@@ -456,98 +482,146 @@ export function EditorShell({
                 </Panel>
                 <Panel defaultSize="280px" maxSize="420px" minSize="220px">
                   <aside className="flex h-full flex-col border-r border-vscode-border bg-vscode-side">
-                    <div className="flex items-center justify-between border-b border-vscode-border px-2 py-2">
-                      <span className="text-xs font-semibold uppercase tracking-wide text-vscode-muted">
-                        Explorer
-                      </span>
-                      <div className="flex items-center gap-1">
-                        <button
-                          className="rounded p-1 text-vscode-muted hover:bg-[#2a2d2e] hover:text-white"
-                          onClick={onAddFile}
-                          title="New File"
-                          type="button"
-                        >
-                          <FilePlus2 className="h-4 w-4" />
-                        </button>
-                        <button
-                          className="rounded p-1 text-vscode-muted hover:bg-[#2a2d2e] hover:text-white"
-                          onClick={onAddFolder}
-                          title="New Folder"
-                          type="button"
-                        >
-                          <FolderPlus className="h-4 w-4" />
-                        </button>
-                        <button
-                          className="rounded p-1 text-vscode-muted hover:bg-[#2a2d2e] hover:text-white"
-                          onClick={onRefreshExplorer}
-                          title="Refresh Explorer"
-                          type="button"
-                        >
-                          <RefreshCw className="h-4 w-4" />
-                        </button>
-                        <button
-                          className="rounded p-1 text-vscode-muted hover:bg-[#2a2d2e] hover:text-white"
-                          onClick={collapseAllFolders}
-                          title="Collapse Folders"
-                          type="button"
-                        >
-                          <ChevronDown className="h-4 w-4 -rotate-90" />
-                        </button>
-                      </div>
-                    </div>
-                    <div className="scrollbar-thin flex-1 overflow-auto py-1">
-                      {fileTree.map((node) => (
-                        <TreeNode
-                          key={node.id}
-                          activeFileId={activeFileId}
-                          node={node}
-                          onOpenFile={onOpenFile}
-                          expandedFolders={expandedFolders}
-                          onToggleFolder={(folderId) =>
-                            setExpandedFolders((prev) => ({
-                              ...prev,
-                              [folderId]: !(prev[folderId] ?? true),
-                            }))
-                          }
-                        />
-                      ))}
-                    </div>
-                    <div className="border-t border-vscode-border px-2 py-2">
-                      <div className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-vscode-muted">
-                        Collaborators
-                      </div>
-                      <div className="scrollbar-thin max-h-40 space-y-1 overflow-auto pr-1">
-                        {collaborators.length === 0 && (
-                          <p className="text-xs text-vscode-muted">
-                            No collaborators yet
-                          </p>
-                        )}
-                        {collaborators.map((member) => (
-                          <div
-                            key={member.id}
-                            className="flex items-center gap-2 rounded px-1 py-1 text-xs hover:bg-[#2a2d2e]"
-                            title={member.email}
-                          >
-                            <div className="flex h-6 w-6 items-center justify-center rounded-full bg-[#3a3d41] font-semibold text-white">
-                              {(member.avatar || member.username || member.email)
-                                .slice(0, 1)
-                                .toUpperCase()}
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate text-vscode-text">
-                                {member.username || member.email}
-                              </p>
-                              <p className="truncate text-[10px] text-vscode-muted">
-                                {member.email}
-                              </p>
-                            </div>
-                            <span className="rounded bg-[#2f2f2f] px-1.5 py-0.5 text-[10px] uppercase text-vscode-blue">
-                              {member.role}
-                            </span>
+                    {activeSidebarTab === "explorer" ? (
+                      <>
+                        <div className="flex items-center justify-between border-b border-vscode-border px-2 py-2">
+                          <span className="text-xs font-semibold uppercase tracking-wide text-vscode-muted">
+                            Explorer
+                          </span>
+                          <div className="flex items-center gap-1">
+                            <button
+                              className="rounded p-1 text-vscode-muted hover:bg-[#2a2d2e] hover:text-white"
+                              onClick={onAddFile}
+                              title="New File"
+                              type="button"
+                            >
+                              <FilePlus2 className="h-4 w-4" />
+                            </button>
+                            <button
+                              className="rounded p-1 text-vscode-muted hover:bg-[#2a2d2e] hover:text-white"
+                              onClick={onAddFolder}
+                              title="New Folder"
+                              type="button"
+                            >
+                              <FolderPlus className="h-4 w-4" />
+                            </button>
+                            <button
+                              className="rounded p-1 text-vscode-muted hover:bg-[#2a2d2e] hover:text-white"
+                              onClick={onRefreshExplorer}
+                              title="Refresh Explorer"
+                              type="button"
+                            >
+                              <RefreshCw className="h-4 w-4" />
+                            </button>
+                            <button
+                              className="rounded p-1 text-vscode-muted hover:bg-[#2a2d2e] hover:text-white"
+                              onClick={collapseAllFolders}
+                              title="Collapse Folders"
+                              type="button"
+                            >
+                              <ChevronDown className="h-4 w-4 -rotate-90" />
+                            </button>
                           </div>
-                        ))}
+                        </div>
+                        <div className="scrollbar-thin flex-1 overflow-auto py-1">
+                          {fileTree.map((node) => (
+                            <TreeNode
+                              key={node.id}
+                              activeFileId={activeFileId}
+                              node={node}
+                              onOpenFile={onOpenFile}
+                              expandedFolders={expandedFolders}
+                              onToggleFolder={(folderId) =>
+                                setExpandedFolders((prev) => ({
+                                  ...prev,
+                                  [folderId]: !(prev[folderId] ?? true),
+                                }))
+                              }
+                            />
+                          ))}
+                        </div>
+                        <div className="border-t border-vscode-border px-2 py-2">
+                          <div className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-vscode-muted">
+                            Collaborators
+                          </div>
+                          <div className="scrollbar-thin max-h-40 space-y-1 overflow-auto pr-1">
+                            {collaborators.length === 0 && (
+                              <p className="text-xs text-vscode-muted">
+                                No collaborators yet
+                              </p>
+                            )}
+                            {collaborators.map((member) => (
+                              <div
+                                key={member.id}
+                                className="flex items-center gap-2 rounded px-1 py-1 text-xs hover:bg-[#2a2d2e]"
+                                title={member.email}
+                              >
+                                <div className="flex h-6 w-6 items-center justify-center rounded-full bg-[#3a3d41] font-semibold text-white">
+                                  {(member.avatar || member.username || member.email)
+                                    .slice(0, 1)
+                                    .toUpperCase()}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate text-vscode-text">
+                                    {member.username || member.email}
+                                  </p>
+                                  <p className="truncate text-[10px] text-vscode-muted">
+                                    {member.email}
+                                  </p>
+                                </div>
+                                <span className="rounded bg-[#2f2f2f] px-1.5 py-0.5 text-[10px] uppercase text-vscode-blue">
+                                  {member.role}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="flex h-full flex-col p-3">
+                        <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-vscode-muted">
+                          Search
+                        </div>
+                        <div className="relative mb-4">
+                          <input
+                            id="workspace-search-input"
+                            type="text"
+                            placeholder="Search in files..."
+                            className="w-full rounded bg-[#3c3c3c] px-3 py-1.5 text-sm text-vscode-text placeholder-vscode-muted focus:outline-none focus:ring-1 focus:ring-vscode-blue"
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                          />
+                        </div>
+                        <div className="scrollbar-thin flex-1 overflow-auto">
+                          {!searchQuery.trim() ? (
+                            <p className="text-xs text-vscode-muted text-center mt-4">Type to search files and content</p>
+                          ) : searchResults.length === 0 ? (
+                            <p className="text-xs text-vscode-muted text-center mt-4">No results found.</p>
+                          ) : (
+                            <div className="space-y-2">
+                              {searchResults.map((res, i) => (
+                                <button
+                                  key={`${res.file.id}-${i}`}
+                                  className="w-full rounded px-2 py-1.5 text-left text-xs hover:bg-[#2a2d2e]"
+                                  onClick={() => onOpenFile(res.file.id)}
+                                >
+                                  <div className="flex items-center gap-1.5 font-medium text-white">
+                                    <File className="h-3.5 w-3.5 text-vscode-muted" />
+                                    <span>{res.file.name}</span>
+                                    {res.matchType === "content" && <span className="text-[10px] text-vscode-muted ml-auto">Line {res.line}</span>}
+                                  </div>
+                                  {res.matchType === "content" && (
+                                    <div className="mt-1 truncate text-[10px] text-vscode-muted bg-[#232323] px-1.5 py-1 rounded border border-vscode-border">
+                                      {res.content}
+                                    </div>
+                                  )}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </aside>
                 </Panel>
                 <Separator className="w-1 bg-vscode-border" />

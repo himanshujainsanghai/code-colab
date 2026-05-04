@@ -26,7 +26,7 @@ export async function searchUsers(request: Request, response: Response) {
     const regex = new RegExp(`^${escapeRegex(normalized)}`, "i");
     users = await User.find({ username: regex })
       .limit(5)
-      .select("_id username avatar")
+      .select("_id username avatar email")
       .lean();
   }
 

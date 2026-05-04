@@ -2,8 +2,8 @@ import type { FileNode, ProjectSummary } from "./types";
 
 export const mockProjects: ProjectSummary[] = [
   {
-    id: "multicoder",
-    name: "MultiCoder",
+    id: "colab-code",
+    name: "Colab Code",
     description: "Collaborative VS Code style web IDE",
     updatedAt: "Updated 5 minutes ago",
     collaborators: [
@@ -31,7 +31,7 @@ export const mockTree: FileNode[] = [
         name: "main.js",
         type: "file",
         language: "javascript",
-        content: `function greet(name) {\n  return \`Hello, \${name}!\`;\n}\n\nconsole.log(greet("MultiCoder"));\n`,
+        content: `function greet(name) {\n  return \`Hello, \${name}!\`;\n}\n\nconsole.log(greet("Colab Code"));\n`,
       },
       {
         id: "utils-js",
@@ -47,7 +47,7 @@ export const mockTree: FileNode[] = [
     name: "README.md",
     type: "file",
     language: "markdown",
-    content: `# MultiCoder\n\nReal-time collaborative IDE powered by Monaco + Yjs.\n`,
+    content: `# Colab Code\n\nReal-time collaborative IDE powered by Monaco + Yjs.\n`,
   },
 ];
 

@@ -1,6 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { AxiosError } from "axios";
 import { useState } from "react";
+import { Eye, EyeOff } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { z } from "zod";
@@ -27,6 +28,8 @@ export function RegisterPage() {
   const [searchParams] = useSearchParams();
   const { register: registerUser } = useAuth();
   const [serverError, setServerError] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const {
     register,
     handleSubmit,
@@ -70,18 +73,36 @@ export function RegisterPage() {
             placeholder="Email"
             {...register("email")}
           />
-          <input
-            className="w-full rounded-md border border-vscode-border bg-[#1e1e1e] px-3 py-2 text-sm outline-none focus:shadow-glow"
-            placeholder="Password"
-            type="password"
-            {...register("password")}
-          />
-          <input
-            className="w-full rounded-md border border-vscode-border bg-[#1e1e1e] px-3 py-2 text-sm outline-none focus:shadow-glow"
-            placeholder="Confirm password"
-            type="password"
-            {...register("confirmPassword")}
-          />
+          <div className="relative">
+            <input
+              className="w-full rounded-md border border-vscode-border bg-[#1e1e1e] py-2 pl-3 pr-10 text-sm outline-none focus:shadow-glow"
+              placeholder="Password"
+              type={showPassword ? "text" : "password"}
+              {...register("password")}
+            />
+            <button
+              type="button"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-vscode-muted hover:text-white"
+              onClick={() => setShowPassword(!showPassword)}
+            >
+              {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
+          <div className="relative">
+            <input
+              className="w-full rounded-md border border-vscode-border bg-[#1e1e1e] py-2 pl-3 pr-10 text-sm outline-none focus:shadow-glow"
+              placeholder="Confirm password"
+              type={showConfirmPassword ? "text" : "password"}
+              {...register("confirmPassword")}
+            />
+            <button
+              type="button"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-vscode-muted hover:text-white"
+              onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+            >
+              {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
           {(errors.username || errors.email || errors.password || errors.confirmPassword) && (
             <p className="text-xs text-red-400">Please fill all fields correctly.</p>
           )}

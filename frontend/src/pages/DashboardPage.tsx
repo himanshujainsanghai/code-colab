@@ -1,8 +1,10 @@
-import { ArrowRight, FolderKanban, Home, LogOut, Plus, UserCircle2 } from "lucide-react";
+import { ArrowRight, Plus, Lock, Globe } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import api from "../lib/api";
+import { CreateProjectModal } from "../components/CreateProjectModal";
+import { InviteUserModal } from "../components/InviteUserModal";
 
 interface DashboardProject {
   _id: string;
@@ -10,16 +12,16 @@ interface DashboardProject {
   description: string;
   updatedAt: string;
   role: "viewer" | "editor" | "admin";
+  isPublic: boolean;
 }
 
 export function DashboardPage() {
-  const navigate = useNavigate();
-  const { logout, user } = useAuth();
+  const { user } = useAuth();
   const [projects, setProjects] = useState<DashboardProject[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
-  const [inviteMessage, setInviteMessage] = useState<string | null>(null);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [inviteProject, setInviteProject] = useState<{ id: string; name: string } | null>(null);
 
   const loadProjects = async () => {
     setLoading(true);
@@ -41,84 +43,11 @@ export function DashboardPage() {
 
   const initials = useMemo(() => user?.username?.slice(0, 1).toUpperCase() ?? "U", [user]);
 
-  const createProject = async () => {
-    const name = window.prompt("Project name", "New Project");
-    if (!name?.trim()) return;
-    setCreating(true);
-    try {
-      await api.post("/projects", {
-        name: name.trim(),
-        description: "Created from dashboard",
-      });
-      await loadProjects();
-    } finally {
-      setCreating(false);
-    }
-  };
-
-  const inviteToProject = async (project: DashboardProject) => {
-    setInviteMessage(null);
-    const email = window.prompt(`Invite user to ${project.name} (email)`);
-    if (!email) return;
-    const roleInput = window.prompt("Role: viewer | editor | admin", "editor");
-    const role = roleInput === "viewer" || roleInput === "admin" || roleInput === "editor" ? roleInput : "editor";
-
-    try {
-      const response = await api.post(`/projects/${project._id}/invitations`, {
-        invitedEmail: email.trim(),
-        role,
-      });
-      const inviteLink = response.data.data.inviteLink as string;
-      if (navigator.clipboard && inviteLink) {
-        await navigator.clipboard.writeText(inviteLink);
-        setInviteMessage("Invitation sent. Link copied to clipboard.");
-      } else {
-        setInviteMessage("Invitation sent.");
-      }
-    } catch {
-      setInviteMessage("Could not send invitation.");
-    }
-  };
 
   return (
     <main className="min-h-screen bg-[#111315] px-6 py-8 text-vscode-text">
       <div className="mx-auto max-w-6xl">
-        <nav className="mb-6 flex items-center justify-between rounded-xl border border-vscode-border bg-vscode-panel px-4 py-3">
-          <div className="flex items-center gap-6">
-            <div className="flex items-center gap-2 text-sm font-semibold text-white">
-              <span className="inline-block h-2.5 w-2.5 rounded-full bg-[#29b6f6]" />
-              Colab Code
-            </div>
-            <Link className="rounded-md px-2 py-1 text-sm text-vscode-muted hover:bg-[#2a2d2e] hover:text-white" to="/dashboard">
-              <Home className="mr-1 inline h-4 w-4" />
-              Home
-            </Link>
-            <Link className="rounded-md px-2 py-1 text-sm text-vscode-muted hover:bg-[#2a2d2e] hover:text-white" to="/profile">
-              <UserCircle2 className="mr-1 inline h-4 w-4" />
-              Profile
-            </Link>
-            <span className="rounded-md px-2 py-1 text-sm text-vscode-blue">
-              <FolderKanban className="mr-1 inline h-4 w-4" />
-              Projects
-            </span>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="hidden text-xs text-vscode-muted sm:inline">
-              Signed in as <span className="text-white">{user?.username ?? "Developer"}</span>
-            </span>
-            <button
-              className="rounded-md border border-vscode-border px-3 py-1.5 text-sm text-vscode-muted hover:bg-[#2a2d2e] hover:text-white"
-              onClick={async () => {
-                await logout();
-                navigate("/login");
-              }}
-              type="button"
-            >
-              <LogOut className="mr-1 inline h-4 w-4" />
-              Sign Out
-            </button>
-          </div>
-        </nav>
+
 
         <header className="mb-8 flex items-center justify-between">
           <div>
@@ -126,19 +55,17 @@ export function DashboardPage() {
             <h1 className="text-2xl font-bold text-white">Your Projects</h1>
           </div>
           <button
-            className="rounded-md bg-vscode-blue px-4 py-2 text-sm text-white hover:brightness-110 disabled:opacity-60"
-            disabled={creating}
-            onClick={createProject}
+            className="rounded-md bg-vscode-blue px-4 py-2 text-sm text-white transition hover:brightness-110"
+            onClick={() => setIsCreateModalOpen(true)}
             type="button"
           >
             <Plus className="mr-1 inline h-4 w-4" />
-            {creating ? "Creating..." : "New Project"}
+            New Project
           </button>
         </header>
 
         {loading && <p className="mb-4 text-sm text-vscode-muted">Loading projects...</p>}
         {error && <p className="mb-4 text-sm text-red-400">{error}</p>}
-        {inviteMessage && <p className="mb-4 text-sm text-vscode-blue">{inviteMessage}</p>}
 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {projects.map((project) => (
@@ -147,7 +74,14 @@ export function DashboardPage() {
               className="rounded-xl border border-vscode-border bg-vscode-panel p-4 transition hover:border-vscode-blue"
             >
               <Link className="block" to={`/project/${project._id}`}>
-                <h3 className="text-lg font-semibold text-white">{project.name}</h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-lg font-semibold text-white">{project.name}</h3>
+                  {project.isPublic ? (
+                    <span title="Public Project"><Globe className="h-3.5 w-3.5 text-vscode-muted" /></span>
+                  ) : (
+                    <span title="Private Project"><Lock className="h-3.5 w-3.5 text-vscode-muted" /></span>
+                  )}
+                </div>
                 <p className="mt-1 text-sm text-vscode-muted">{project.description || "No description yet."}</p>
               </Link>
               <p className="mt-3 text-xs text-vscode-muted">
@@ -167,7 +101,7 @@ export function DashboardPage() {
                 {(project.role === "admin") && (
                   <button
                     className="ml-auto rounded-md border border-vscode-border px-2 py-1 text-xs text-vscode-muted hover:bg-[#2a2d2e] hover:text-white"
-                    onClick={() => void inviteToProject(project)}
+                    onClick={() => setInviteProject({ id: project._id, name: project.name })}
                     type="button"
                   >
                     Invite
@@ -179,11 +113,27 @@ export function DashboardPage() {
         </div>
 
         {!loading && projects.length === 0 && (
-          <div className="mt-6 rounded-lg border border-dashed border-vscode-border p-6 text-sm text-vscode-muted">
-            No projects yet. Click <span className="text-white">New Project</span> to create your first workspace.
+          <div className="mt-6 rounded-lg border border-dashed border-vscode-border p-6 text-sm text-vscode-muted text-center">
+            No projects yet. Click <button onClick={() => setIsCreateModalOpen(true)} className="text-white hover:text-vscode-blue transition font-medium">New Project</button> to create your first workspace.
           </div>
         )}
       </div>
+      {isCreateModalOpen && (
+        <CreateProjectModal
+          onClose={() => setIsCreateModalOpen(false)}
+          onSuccess={() => {
+            setIsCreateModalOpen(false);
+            loadProjects();
+          }}
+        />
+      )}
+      {inviteProject && (
+        <InviteUserModal
+          projectId={inviteProject.id}
+          projectName={inviteProject.name}
+          onClose={() => setInviteProject(null)}
+        />
+      )}
     </main>
   );
 }
