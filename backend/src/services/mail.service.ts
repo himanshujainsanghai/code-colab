@@ -19,14 +19,21 @@ function createTransporter() {
     return null;
   }
 
+  const secure = env.SMTP_PORT === 465;
+
   return nodemailer.createTransport({
     host: env.SMTP_HOST,
-    port: 465,          // SMTPS – implicit TLS; works from cloud IPs
-    secure: true,       // true = TLS from the first byte (required for 465)
+    port: env.SMTP_PORT,
+    // 465 uses implicit TLS, 587 uses STARTTLS.
+    secure,
     auth: {
       user: env.SMTP_USER,
       pass: env.SMTP_PASS,
     },
+    requireTLS: !secure,
+    connectionTimeout: 20_000,
+    greetingTimeout: 20_000,
+    socketTimeout: 30_000,
     tls: {
       rejectUnauthorized: true, // always validate the server certificate
     },
@@ -39,14 +46,15 @@ const transporter = createTransporter();
 export async function sendResetPasswordMail(to: string, resetLink: string) {
   if (!transporter) {
     console.warn("[mail] SMTP credentials not configured – skipping reset-password email.");
-    return;
+    return false;
   }
 
-  await transporter.sendMail({
-    from: `"Colab Code" <${env.SMTP_USER}>`,
-    to,
-    subject: "Reset your Colab Code password",
-    html: `
+  try {
+    await transporter.sendMail({
+      from: `"Colab Code" <${env.SMTP_USER}>`,
+      to,
+      subject: "Reset your Colab Code password",
+      html: `
       <p>You requested a password reset for your Colab Code account.</p>
       <p>
         <a href="${resetLink}" style="display:inline-block;padding:10px 20px;background:#007acc;color:#fff;text-decoration:none;border-radius:6px;">
@@ -57,7 +65,12 @@ export async function sendResetPasswordMail(to: string, resetLink: string) {
       <p><a href="${resetLink}">${resetLink}</a></p>
       <p>This link expires in 15 minutes. If you didn't request a reset, you can safely ignore this email.</p>
     `,
-  });
+    });
+    return true;
+  } catch (error) {
+    console.error("[mail] Failed to send reset-password email:", error);
+    throw error;
+  }
 }
 
 export async function sendInvitationMail(input: {
@@ -69,14 +82,15 @@ export async function sendInvitationMail(input: {
 }) {
   if (!transporter) {
     console.warn("[mail] SMTP credentials not configured – skipping invitation email.");
-    return;
+    return false;
   }
 
-  await transporter.sendMail({
-    from: `"Colab Code" <${env.SMTP_USER}>`,
-    to: input.to,
-    subject: `Invitation to collaborate on ${input.projectName}`,
-    html: `
+  try {
+    await transporter.sendMail({
+      from: `"Colab Code" <${env.SMTP_USER}>`,
+      to: input.to,
+      subject: `Invitation to collaborate on ${input.projectName}`,
+      html: `
       <p><strong>${input.inviterName}</strong> invited you to collaborate on <strong>${input.projectName}</strong>.</p>
       <p>Your role: <strong>${input.role}</strong></p>
       <p>
@@ -87,5 +101,10 @@ export async function sendInvitationMail(input: {
       <p>If the button does not work, use this link:</p>
       <p><a href="${input.inviteLink}">${input.inviteLink}</a></p>
     `,
-  });
+    });
+    return true;
+  } catch (error) {
+    console.error("[mail] Failed to send invitation email:", error);
+    throw error;
+  }
 }

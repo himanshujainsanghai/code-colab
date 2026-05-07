@@ -31,7 +31,7 @@ const resetSchema = z.object({
 const refreshTtlMs = 7 * 24 * 60 * 60 * 1000;
 const resetTokenTtlMs = 15 * 60 * 1000;
 const accessTtlMs = 15 * 60 * 1000;
-const mailTimeoutMs = 8000;
+const mailTimeoutMs = 25000;
 
 function authCookieOptions(maxAge: number) {
   return {
@@ -206,8 +206,14 @@ export async function forgotPassword(request: Request, response: Response) {
           setTimeout(() => reject(new Error("Mail send timed out")), mailTimeoutMs);
         }),
       ]);
-    } catch {
-      // Keep response generic and non-blocking even if mail provider is slow/failing.
+    } catch (error) {
+      // Keep response generic for account-enumeration safety, but log why delivery failed.
+      console.error("[auth] Failed to send reset-password mail", {
+        userId: user._id.toString(),
+        email: user.email,
+        clientOrigin: env.CLIENT_ORIGIN,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
   return response.json({ message: "If an account exists, a reset link has been sent." });

@@ -5,8 +5,39 @@ interface RetryableRequestConfig extends InternalAxiosRequestConfig {
   _retry?: boolean;
 }
 
+function resolveApiBaseUrl() {
+  const configured = import.meta.env.VITE_API_URL as string | undefined;
+
+  if (!import.meta.env.PROD) {
+    return configured ?? "http://localhost:4000/api";
+  }
+
+  // In production, keep auth cookies first-party via Vercel rewrite (`/api`).
+  // This avoids third-party cookie blocking when pointing directly to Render.
+  if (!configured || configured === "/api") {
+    return "/api";
+  }
+
+  try {
+    const parsed = new URL(configured, window.location.origin);
+    if (parsed.origin !== window.location.origin) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[api] Cross-origin VITE_API_URL detected in production (${configured}); forcing /api to preserve auth cookies.`,
+      );
+      return "/api";
+    }
+  } catch {
+    // eslint-disable-next-line no-console
+    console.warn(`[api] Invalid VITE_API_URL "${configured}" in production; forcing /api.`);
+    return "/api";
+  }
+
+  return configured;
+}
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL ?? "http://localhost:4000/api",
+  baseURL: resolveApiBaseUrl(),
   withCredentials: true,
 });
 
