@@ -1,5 +1,14 @@
+import dns from "node:dns";
 import nodemailer from "nodemailer";
 import { env } from "../config/env.js";
+
+// Many cloud runtimes still have no usable IPv6 egress.
+// Prefer IPv4 when resolving smtp.gmail.com to avoid ENETUNREACH on AAAA records.
+try {
+  dns.setDefaultResultOrder("ipv4first");
+} catch {
+  // Older Node versions may not support this API; ignore safely.
+}
 
 /**
  * Singleton transporter.
@@ -42,6 +51,24 @@ function createTransporter() {
 
 // Build once at module load time so the TCP connection can be reused.
 const transporter = createTransporter();
+
+async function logSmtpHealthOnStartup() {
+  if (!transporter) {
+    console.warn("[mail] SMTP transporter is disabled: missing SMTP_HOST/SMTP_USER/SMTP_PASS.");
+    return;
+  }
+
+  try {
+    await transporter.verify();
+    console.log(
+      `[mail] SMTP transporter verified successfully (${env.SMTP_HOST}:${env.SMTP_PORT}).`,
+    );
+  } catch (error) {
+    console.error("[mail] SMTP transporter verification failed:", error);
+  }
+}
+
+void logSmtpHealthOnStartup();
 
 export async function sendResetPasswordMail(to: string, resetLink: string) {
   if (!transporter) {
