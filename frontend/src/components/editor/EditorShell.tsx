@@ -1,3 +1,4 @@
+import React from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import {
   ChevronDown,
@@ -9,19 +10,18 @@ import {
   FolderPlus,
   FolderOpen,
   GitBranch,
-  Minus,
   Plus,
   Play,
   RefreshCw,
   Search,
   Settings,
-  Square,
   TerminalSquare,
   X,
 } from "lucide-react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "../../lib/auth";
 import type { FileNode, RunResult } from "../../lib/types";
 
 interface EditorShellProps {
@@ -29,7 +29,10 @@ interface EditorShellProps {
   fileTree: FileNode[];
   activeFileId: string;
   openFileIds: string[];
+  /** Set of file IDs that have been locally modified since last save */
+  dirtyFileIds: Set<string>;
   onOpenFile: (fileId: string) => void;
+  /** Called after the close decision has been confirmed (save or discard). */
   onCloseFile: (fileId: string) => void;
   onRun: () => Promise<void>;
   onAddFile: () => void;
@@ -37,7 +40,8 @@ interface EditorShellProps {
   onRefreshExplorer: () => void;
   runResult: RunResult | null;
   running: boolean;
-  onSave: () => Promise<void>;
+  /** Saves a specific file (or active file if no id passed) and marks it clean. */
+  onSave: (fileId?: string) => Promise<void>;
   collaborators: Array<{
     id: string;
     username: string;
@@ -45,17 +49,97 @@ interface EditorShellProps {
     avatar?: string;
     role: "owner" | "viewer" | "editor" | "admin";
   }>;
-  fileContent: string;
-  setFileContent: (content: string) => void;
   language: string;
   onEditorMount?: OnMount;
 }
 
-function flattenFiles(nodes: FileNode[]): FileNode[] {
-  return nodes.flatMap((node) =>
-    node.type === "file" ? [node] : flattenFiles(node.children ?? []),
+// ---------------------------------------------------------------------------
+// UnsavedDialog — VSCode-style modal, no browser confirm()
+// ---------------------------------------------------------------------------
+interface UnsavedDialogProps {
+  fileName: string;
+  onSave: () => void;
+  onDontSave: () => void;
+  onCancel: () => void;
+}
+
+function UnsavedDialog({ fileName, onSave, onDontSave, onCancel }: UnsavedDialogProps) {
+  // Close on backdrop click
+  const handleBackdrop = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.target === e.currentTarget) onCancel();
+  };
+  // Close on Escape
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCancel();
+      if (e.key === "Enter") onSave();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onSave, onCancel]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-[2px]"
+      onClick={handleBackdrop}
+    >
+      <div
+        className="w-[420px] rounded-lg border border-[#454545] bg-[#252526] shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="unsaved-dialog-title"
+      >
+        {/* Title bar */}
+        <div className="flex items-start gap-4 px-6 pt-6 pb-4">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#3a2d00]">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+              <path d="M10 2L18.66 17H1.34L10 2z" fill="#f0c040" opacity="0.15" />
+              <path d="M10 3.5L17.5 16.5H2.5L10 3.5z" stroke="#f0c040" strokeWidth="1.5" fill="none" />
+              <rect x="9.25" y="8" width="1.5" height="4.5" rx="0.75" fill="#f0c040" />
+              <rect x="9.25" y="13.5" width="1.5" height="1.5" rx="0.75" fill="#f0c040" />
+            </svg>
+          </div>
+          <div>
+            <h2 id="unsaved-dialog-title" className="text-[15px] font-semibold text-white leading-snug">
+              Do you want to save the changes you made to {fileName}?
+            </h2>
+            <p className="mt-1.5 text-sm text-[#9d9d9d]">
+              Your changes will be lost if you don&apos;t save them.
+            </p>
+          </div>
+        </div>
+        {/* Actions */}
+        <div className="flex justify-end gap-2 border-t border-[#3c3c3c] px-6 py-4">
+          <button
+            autoFocus
+            className="rounded px-4 py-1.5 text-sm font-medium text-white ring-1 ring-[#0078d4] bg-[#0078d4] hover:bg-[#0090f1] focus:outline-none focus:ring-2 focus:ring-[#0078d4] focus:ring-offset-1 focus:ring-offset-[#252526] transition-colors"
+            onClick={onSave}
+            type="button"
+          >
+            Save
+          </button>
+          <button
+            className="rounded px-4 py-1.5 text-sm font-medium text-white ring-1 ring-[#454545] bg-transparent hover:bg-[#3c3c3c] focus:outline-none focus:ring-2 focus:ring-[#454545] focus:ring-offset-1 focus:ring-offset-[#252526] transition-colors"
+            onClick={onDontSave}
+            type="button"
+          >
+            Don&apos;t Save
+          </button>
+          <button
+            className="rounded px-4 py-1.5 text-sm font-medium text-white ring-1 ring-[#454545] bg-transparent hover:bg-[#3c3c3c] focus:outline-none focus:ring-2 focus:ring-[#454545] focus:ring-offset-1 focus:ring-offset-[#252526] transition-colors"
+            onClick={onCancel}
+            type="button"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
+
+// Note: flattenFiles is intentionally NOT duplicated here.
+// EditorPage owns the canonical file list and passes it as props.
 
 function TreeNode({
   node,
@@ -129,6 +213,7 @@ export function EditorShell({
   fileTree,
   activeFileId,
   openFileIds,
+  dirtyFileIds,
   onOpenFile,
   onCloseFile,
   onRun,
@@ -139,19 +224,44 @@ export function EditorShell({
   running,
   onSave,
   collaborators,
-  fileContent,
-  setFileContent,
   language,
   onEditorMount,
 }: EditorShellProps) {
   const navigate = useNavigate();
-  const files = useMemo(() => flattenFiles(fileTree), [fileTree]);
+  const { user } = useAuth();
+  // Pending close dialog state: holds the file we're about to close
+  const [pendingClose, setPendingClose] = useState<{ id: string; name: string } | null>(null);
+  // folderIds is used for collapse-all; we compute from fileTree directly.
   const folderIds = useMemo(() => {
     const visit = (nodes: FileNode[]): string[] =>
       nodes.flatMap((node) =>
         node.type === "folder" ? [node.id, ...visit(node.children ?? [])] : [],
       );
     return visit(fileTree);
+  }, [fileTree]);
+  // openFiles: flat list of files currently open in tabs
+  const openFiles = useMemo(() => {
+    const allFiles: FileNode[] = [];
+    const flatten = (nodes: FileNode[]) => {
+      for (const node of nodes) {
+        if (node.type === "file") allFiles.push(node);
+        else flatten(node.children ?? []);
+      }
+    };
+    flatten(fileTree);
+    return allFiles.filter((f) => openFileIds.includes(f.id));
+  }, [fileTree, openFileIds]);
+  // searchResults: search across file names + content from fileTree
+  const searchableFiles = useMemo(() => {
+    const all: FileNode[] = [];
+    const flatten = (nodes: FileNode[]) => {
+      for (const node of nodes) {
+        if (node.type === "file") all.push(node);
+        else flatten(node.children ?? []);
+      }
+    };
+    flatten(fileTree);
+    return all;
   }, [fileTree]);
   const [expandedFolders, setExpandedFolders] = useState<
     Record<string, boolean>
@@ -167,10 +277,42 @@ export function EditorShell({
   const [isSaving, setIsSaving] = useState(false);
   const [uiMessage, setUiMessage] = useState("");
   const uiMessageTimerRef = useRef<number | null>(null);
-  const openFiles = useMemo(
-    () => files.filter((file) => openFileIds.includes(file.id)),
-    [files, openFileIds],
+  // Stable ref to onSave — prevents keyboard useEffect from re-registering on every render
+  const onSaveRef = useRef(onSave);
+  useEffect(() => { onSaveRef.current = onSave; }, [onSave]);
+  // Close a tab — checks dirty state first. If dirty, shows the dialog.
+  // If clean, closes immediately.
+  const requestCloseFile = useCallback(
+    (fileId: string) => {
+      if (dirtyFileIds.has(fileId)) {
+        const file = openFiles.find((f) => f.id === fileId);
+        setPendingClose({ id: fileId, name: file?.name ?? "Untitled" });
+      } else {
+        onCloseFile(fileId);
+      }
+    },
+    [dirtyFileIds, onCloseFile, openFiles],
   );
+  // Dialog handlers
+  const handleDialogSave = useCallback(async () => {
+    if (!pendingClose) return;
+    try {
+      await onSaveRef.current(pendingClose.id);
+    } catch {
+      // Save failed — don't close, keep dialog open momentarily
+      return;
+    }
+    onCloseFile(pendingClose.id);
+    setPendingClose(null);
+  }, [onCloseFile, pendingClose]);
+  const handleDialogDontSave = useCallback(() => {
+    if (!pendingClose) return;
+    onCloseFile(pendingClose.id);
+    setPendingClose(null);
+  }, [onCloseFile, pendingClose]);
+  const handleDialogCancel = useCallback(() => {
+    setPendingClose(null);
+  }, []);
   const collapseAllFolders = () => {
     const collapsed = folderIds.reduce<Record<string, boolean>>((acc, id) => {
       acc[id] = false;
@@ -183,7 +325,7 @@ export function EditorShell({
     if (!searchQuery.trim()) return [];
     const query = searchQuery.toLowerCase();
     const results: Array<{ file: FileNode; line: number; content: string; matchType: "name" | "content" }> = [];
-    files.forEach((file) => {
+    searchableFiles.forEach((file) => {
       if (file.name.toLowerCase().includes(query)) {
         results.push({ file, line: 0, content: file.name, matchType: "name" });
       }
@@ -197,7 +339,7 @@ export function EditorShell({
       }
     });
     return results;
-  }, [files, searchQuery]);
+  }, [searchableFiles, searchQuery]);
   const addTerminal = () => {
     const id = `terminal-${Date.now()}`;
     const next = [...terminals, { id, name: `bash ${terminals.length + 1}` }];
@@ -236,27 +378,17 @@ export function EditorShell({
     await document.exitFullscreen();
     notify("Exited fullscreen");
   }, [notify]);
-  const minimizeWorkspace = useCallback(() => {
-    setShowSidebar(false);
-    setShowTerminal(false);
-    notify("Focus mode enabled");
-  }, [notify]);
-  const closeCurrentTab = useCallback(() => {
-    if (!activeFileId) return;
-    onCloseFile(activeFileId);
-    notify("Closed active tab");
-  }, [activeFileId, notify, onCloseFile]);
-  const saveCurrentFile = useCallback(async () => {
+  const saveCurrentFile = useCallback(async (fileId?: string) => {
     setIsSaving(true);
     try {
-      await onSave();
+      await onSaveRef.current(fileId);
       notify("File saved");
     } catch {
       notify("Save failed");
     } finally {
       setIsSaving(false);
     }
-  }, [notify, onSave]);
+  }, [notify]);
   const quickOpenFile = useCallback(() => {
     setShowSidebar(true);
     setActiveSidebarTab("search");
@@ -277,7 +409,10 @@ export function EditorShell({
         break;
       case "Edit":
         try {
-          await navigator.clipboard.writeText(fileContent);
+          // Copy current editor model value via the DOM clipboard API
+          await navigator.clipboard.writeText(
+            document.querySelector(".monaco-editor textarea")?.textContent ?? "",
+          );
           notify("Editor content copied");
         } catch {
           notify("Clipboard is unavailable");
@@ -321,6 +456,9 @@ export function EditorShell({
     "Help",
   ];
 
+  // Keyboard shortcuts — registered once, never torn down.
+  // saveCurrentFile is stable (depends only on notify which is stable).
+  // toggleFullscreen is stable (depends only on notify).
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
@@ -343,10 +481,19 @@ export function EditorShell({
         window.clearTimeout(uiMessageTimerRef.current);
       }
     };
-  }, [saveCurrentFile, toggleFullscreen]);
+  }, [saveCurrentFile, toggleFullscreen]); // both are now permanently stable
 
   return (
     <div className="relative h-screen w-screen bg-vscode-bg text-vscode-text">
+      {/* Unsaved-changes dialog — rendered above everything */}
+      {pendingClose && (
+        <UnsavedDialog
+          fileName={pendingClose.name}
+          onSave={() => void handleDialogSave()}
+          onDontSave={handleDialogDontSave}
+          onCancel={handleDialogCancel}
+        />
+      )}
       <div className="flex h-8 items-center justify-between border-b border-vscode-border bg-[#202124] px-3 text-xs text-vscode-muted">
         <div className="flex items-center gap-1">
           {menuItems.map((item) => (
@@ -364,15 +511,6 @@ export function EditorShell({
           {projectName} - Colab Code
         </div>
         <div className="flex items-center gap-2 text-vscode-muted">
-          <button className="rounded p-0.5 hover:bg-[#2a2d2e]" onClick={minimizeWorkspace} title="Minimize workspace" type="button">
-            <Minus className="h-3.5 w-3.5" />
-          </button>
-          <button className="rounded p-0.5 hover:bg-[#2a2d2e]" onClick={() => void toggleFullscreen()} title="Toggle fullscreen" type="button">
-            <Square className="h-3.5 w-3.5" />
-          </button>
-          <button className="rounded p-0.5 hover:bg-[#2a2d2e]" onClick={closeCurrentTab} title="Close current tab" type="button">
-            <X className="h-3.5 w-3.5" />
-          </button>
         </div>
       </div>
       <header className="flex h-11 items-center justify-between border-b border-vscode-border bg-vscode-panel px-4">
@@ -390,35 +528,25 @@ export function EditorShell({
             {running ? "Running..." : "Run"}
           </button>
           <button
-            className="rounded-md border border-vscode-border px-3 py-1 text-sm hover:bg-[#2a2d2e]"
+            className="flex items-center gap-1.5 rounded-md border border-vscode-border px-3 py-1 text-sm hover:bg-[#2a2d2e] transition-colors"
             onClick={() => void saveCurrentFile()}
             type="button"
+            title={dirtyFileIds.has(activeFileId) ? "Unsaved changes (Ctrl+S to save)" : "All changes saved"}
           >
+            {dirtyFileIds.has(activeFileId) && (
+              <span className="inline-block h-2 w-2 rounded-full bg-orange-400 shrink-0" aria-label="Unsaved changes" />
+            )}
             {isSaving ? "Saving..." : "Save"}
           </button>
-          <button
-            className="rounded-md border border-vscode-border px-3 py-1 text-sm hover:bg-[#2a2d2e]"
-            onClick={() => setShowTerminal((prev) => !prev)}
-            type="button"
-          >
-            Terminal
-          </button>
-
           <div className="hidden items-center gap-2 md:flex">
-            {collaborators.slice(0, 3).map((member) => (
+            {user && (
               <div
-                key={member.id}
                 className="flex h-8 w-8 items-center justify-center rounded-full bg-[#3a3d41] text-xs font-semibold text-white"
-                title={`${member.username} (${member.role})`}
+                title={`${user.username}`}
               >
-                {(member.avatar || member.username || member.email)
+                {(user.avatar || user.username || user.email)
                   .slice(0, 1)
                   .toUpperCase()}
-              </div>
-            ))}
-            {collaborators.length > 3 && (
-              <div className="flex h-8 min-w-8 items-center justify-center rounded-full bg-[#2d2d2d] px-2 text-xs text-vscode-muted">
-                +{collaborators.length - 3}
               </div>
             )}
           </div>
@@ -439,7 +567,7 @@ export function EditorShell({
         </button>
       )}
 
-      <Group className="h-[calc(100vh-4.75rem)]" orientation="vertical">
+      <Group className="h-[calc(100vh-6.25rem)]" orientation="vertical">
         <Panel defaultSize={showTerminal ? 76 : 100} minSize={55}>
           <Group className="overflow-hidden" orientation="horizontal">
             {showSidebar && (
@@ -629,34 +757,57 @@ export function EditorShell({
             )}
             <Panel defaultSize={showSidebar ? "72%" : "100%"} minSize={40}>
               <section className="flex h-full flex-col bg-vscode-bg">
-                <div className="flex min-h-9 items-center border-b border-vscode-border bg-vscode-panel">
-                  {openFiles.map((file) => (
-                    <button
-                      key={file.id}
-                      className={`flex items-center gap-2 border-r border-vscode-border px-3 py-2 text-sm ${
-                        file.id === activeFileId
-                          ? "bg-vscode-bg"
-                          : "bg-vscode-panel text-vscode-muted"
-                      }`}
-                      onClick={() => onOpenFile(file.id)}
-                      type="button"
-                    >
-                      <File className="h-3.5 w-3.5" />
-                      <span>{file.name}</span>
-                      <X
-                        className="ml-1 rounded p-0.5 h-4 w-4 text-vscode-muted hover:bg-[#2a2d2e] hover:text-white"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onCloseFile(file.id);
-                        }}
-                      />
-                    </button>
-                  ))}
+                <div className="flex min-h-9 items-center overflow-x-auto border-b border-vscode-border bg-vscode-panel">
+                  {openFiles.map((file) => {
+                    const isDirty = dirtyFileIds.has(file.id);
+                    const isActive = file.id === activeFileId;
+                    return (
+                      <div
+                        key={file.id}
+                        className={`group relative flex shrink-0 items-center gap-1.5 border-r border-vscode-border px-3 py-2 text-sm select-none cursor-pointer ${
+                          isActive ? "bg-vscode-bg" : "bg-vscode-panel text-vscode-muted hover:bg-[#2a2d2e]"
+                        }`}
+                        onClick={() => onOpenFile(file.id)}
+                        role="tab"
+                        aria-selected={isActive}
+                        title={isDirty ? `${file.name} \u2014 unsaved changes` : file.name}
+                      >
+                        <File className="h-3.5 w-3.5 shrink-0" />
+                        <span className={isDirty ? "italic" : ""}>{file.name}</span>
+                        {/* Close/dirty indicator area — 16x16 fixed zone */}
+                        <span className="relative ml-1 flex h-4 w-4 shrink-0 items-center justify-center">
+                          {/* Dirty dot: visible when dirty AND not hovered */}
+                          {isDirty && (
+                            <span className="absolute inset-0 flex items-center justify-center group-hover:opacity-0 transition-opacity">
+                              {/* Hollow circle — matches VSCode modified indicator */}
+                              <svg width="10" height="10" viewBox="0 0 10 10" className="text-[#e8bf6a]">
+                                <circle cx="5" cy="5" r="4" fill="none" stroke="currentColor" strokeWidth="1.5" />
+                              </svg>
+                            </span>
+                          )}
+                          {/* X button: always visible on hover, or always if not dirty */}
+                          <button
+                            className={`absolute inset-0 flex items-center justify-center rounded text-vscode-muted hover:bg-[#3c3c3c] hover:text-white transition-opacity ${
+                              isDirty ? "opacity-0 group-hover:opacity-100" : "opacity-0 group-hover:opacity-100"
+                            }`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              requestCloseFile(file.id);
+                            }}
+                            title="Close"
+                            type="button"
+                            tabIndex={-1}
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
                 <Editor
                   defaultLanguage={language}
                   language={language}
-                  onChange={(value) => setFileContent(value ?? "")}
                   onMount={onEditorMount}
                   options={{
                     minimap: { enabled: false },
@@ -665,7 +816,10 @@ export function EditorShell({
                     wordWrap: "on",
                   }}
                   theme="vs-dark"
-                  value={fileContent}
+                  // NOTE: Do NOT set `value` or `onChange` here.
+                  // MonacoBinding (Yjs) owns the model content.
+                  // Feeding `value` back into Monaco while Yjs binding is active
+                  // causes every edit to be applied twice.
                 />
               </section>
             </Panel>
@@ -756,6 +910,24 @@ export function EditorShell({
           </>
         )}
       </Group>
+      {/* Status bar */}
+      <div className="flex h-6 items-center justify-between border-t border-vscode-border bg-[#007acc] px-3 text-[11px] text-white">
+        <div className="flex items-center gap-3">
+          <span>Colab Code</span>
+          {dirtyFileIds.size > 0 && (
+            <span className="flex items-center gap-1 text-[#ffe082]">
+              <svg width="10" height="10" viewBox="0 0 10 10">
+                <circle cx="5" cy="5" r="4" fill="none" stroke="currentColor" strokeWidth="1.5" />
+              </svg>
+              {dirtyFileIds.size} unsaved {dirtyFileIds.size === 1 ? "file" : "files"}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-3 opacity-80">
+          <span>{language}</span>
+          {dirtyFileIds.size === 0 && <span>All changes saved</span>}
+        </div>
+      </div>
     </div>
   );
 }

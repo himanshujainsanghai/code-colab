@@ -24,12 +24,10 @@ async function bootstrap() {
 
   io.on("connection", (socket) => {
     socket.on("join-project", (projectId: string) => {
-      socket.join(projectId);
+      void socket.join(projectId);
     });
-
-    socket.on("file-tree-updated", (projectId: string) => {
-      io.to(projectId).emit("file-tree-updated", projectId);
-    });
+    // Clients do NOT relay file-tree events — only the server emits them
+    // via emitProjectFileTreeUpdated() called from API controllers.
   });
   setSocketServer(io);
 

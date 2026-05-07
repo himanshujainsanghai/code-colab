@@ -1,109 +1,112 @@
 import { Server } from "@hocuspocus/server";
-import { Redis } from "ioredis";
 import * as Y from "yjs";
 import { env } from "../config/env.js";
 import { FileNode } from "../models/FileNode.js";
 
-function decodeFileId(name: string) {
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function decodeFileId(name: string): string {
+  // Document names follow the pattern: "project:<pid>:file:<fid>"
   const match = name.match(/file:([^:]+)$/);
-  if (match?.[1]) {
-    return match[1];
-  }
-  const parts = name.split(":");
-  return parts.at(-1) ?? name;
+  if (match?.[1]) return match[1];
+  // Fallback: last colon-separated segment
+  return name.split(":").at(-1) ?? name;
 }
 
-export async function startCollabServer() {
-  const redis = new Redis(env.REDIS_URL, {
-    lazyConnect: true,
-    retryStrategy: () => null,
-    maxRetriesPerRequest: 1,
-    enableOfflineQueue: false,
-  });
-  let redisReady = false;
-  const persistTimers = new Map<string, NodeJS.Timeout>();
+/**
+ * Detect and repair obviously-corrupted repeated content.
+ *
+ * The corruption pattern is: the same code block appended to itself N times.
+ * We detect this by finding the smallest line-group that, when repeated,
+ * reconstructs most of the content.
+ *
+ * This is a one-time safety net for documents corrupted before the persistence
+ * rewrite. It runs only in onLoadDocument (cold start), never during editing.
+ */
+function repairRepeatedContent(content: string): string {
+  const lines = content.split("\n");
 
-  const getCacheKey = (documentName: string) => `collab:document:${documentName}`;
+  // Only bother for files that are suspiciously large
+  if (lines.length < 15) return content;
 
-  const persistToMongo = async (documentName: string, document: Y.Doc) => {
-    const fileId = decodeFileId(documentName);
-    const content = document.getText("monaco").toString();
-    await FileNode.findByIdAndUpdate(fileId, { content, updatedAt: new Date() });
-  };
+  // Try window sizes from 3 to 60 lines
+  for (let win = 3; win <= Math.min(60, Math.floor(lines.length / 2)); win++) {
+    const unit = lines.slice(0, win).join("\n");
+    if (unit.trim().length === 0) continue;
 
-  const scheduleMongoPersistence = (documentName: string, document: Y.Doc) => {
-    const previousTimer = persistTimers.get(documentName);
-    if (previousTimer) {
-      clearTimeout(previousTimer);
+    const repetitions = Math.round(lines.length / win);
+    if (repetitions < 2) continue;
+
+    // Build what the content would look like if it's exactly `repetitions` copies
+    const candidate = Array(repetitions).fill(unit).join("\n");
+
+    // Allow a small trailing-whitespace margin (last repetition may be incomplete)
+    if (content.startsWith(candidate.slice(0, candidate.length - win * 5))) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[collab] onLoadDocument: detected content repeated ×${repetitions} — auto-repaired to 1 copy.`,
+      );
+      return unit;
     }
-    const timer = setTimeout(() => {
-      persistTimers.delete(documentName);
-      persistToMongo(documentName, document).catch((error) => {
-        // eslint-disable-next-line no-console
-        console.error("Failed to persist collaborative document:", error);
-      });
-    }, 30_000);
-    persistTimers.set(documentName, timer);
-  };
-
-  try {
-    await redis.connect();
-    redisReady = true;
-  } catch {
-    // eslint-disable-next-line no-console
-    console.warn("Redis unavailable for collab cache. Falling back to Mongo-only persistence.");
   }
 
+  return content;
+}
+
+// ---------------------------------------------------------------------------
+// Collaboration server
+// ---------------------------------------------------------------------------
+
+export async function startCollabServer() {
   const server = new Server({
     port: env.COLLAB_PORT,
-    debounce: 2_000,
-    maxDebounce: 30_000,
+
+    /**
+     * Called once, when the FIRST client connects to a document room that has
+     * no in-memory Yjs state (i.e. no other client is currently connected).
+     *
+     * Authority: MongoDB is the ONLY source of truth for persisted content.
+     * Redis is intentionally NOT used here because a stale or corrupted Redis
+     * CRDT state was the root cause of content being multiplied on every reload.
+     *
+     * Mongo is written ONLY by the explicit PUT /files/:id REST call (Save button / Ctrl+S).
+     */
     async onLoadDocument({ documentName, document }) {
+      const yText = document.getText("monaco");
+
+      // Guard: if yText already has content, another client must have seeded it
+      // during this same server session — do not insert again.
+      if (yText.length > 0) return document;
+
       const fileId = decodeFileId(documentName);
       const file = await FileNode.findById(fileId).lean();
-      const persistedContent = file?.content ?? "";
+      let content = file?.content ?? "";
 
-      if (redisReady) {
-        const cachedState = await redis.get(getCacheKey(documentName));
-        if (cachedState) {
-          try {
-            Y.applyUpdate(document, Buffer.from(cachedState, "base64"));
-          } catch {
-            // Ignore corrupt cache and fall back to persisted Mongo content.
-          }
-        }
+      // Auto-repair documents that were corrupted by the old code
+      // (content appended to itself on every page load).
+      content = repairRepeatedContent(content);
+
+      if (content.length > 0) {
+        yText.insert(0, content);
       }
 
-      const yText = document.getText("monaco");
-      if (yText.length === 0 && persistedContent.length > 0) {
-        yText.insert(0, persistedContent);
-      }
       return document;
     },
-    async onChange({ documentName, document }) {
-      if (redisReady) {
-        const state = Y.encodeStateAsUpdate(document);
-        await redis.set(getCacheKey(documentName), Buffer.from(state).toString("base64"));
-      }
-      scheduleMongoPersistence(documentName, document);
-    },
-    async onStoreDocument({ document, documentName }) {
-      await persistToMongo(documentName, document);
-      if (redisReady) {
-        const state = Y.encodeStateAsUpdate(document);
-        await redis.set(getCacheKey(documentName), Buffer.from(state).toString("base64"));
-      }
-    },
-    async onDisconnect({ clientsCount, documentName, document }) {
-      if (clientsCount === 0) {
-        const pendingTimer = persistTimers.get(documentName);
-        if (pendingTimer) {
-          clearTimeout(pendingTimer);
-          persistTimers.delete(documentName);
-        }
-        await persistToMongo(documentName, document);
-      }
-    },
+
+    // onChange  — intentionally omitted.
+    //   We do NOT write to Redis or Mongo on every keystroke.
+    //   Hocuspocus keeps the Yjs document in memory while any client is connected.
+    //   Changes are only persisted when the user explicitly hits Save (PUT /files/:id).
+
+    // onStoreDocument — intentionally omitted.
+    //   We do NOT let Hocuspocus auto-save to Mongo on its own schedule.
+    //   Autonomous persistence was the primary cause of the duplication bug.
+
+    // onDisconnect — intentionally omitted.
+    //   When the last client disconnects, unsaved changes are intentionally lost
+    //   (matching the "save explicitly" contract the UI communicates to the user).
   });
 
   await server.listen();
