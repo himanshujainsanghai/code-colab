@@ -3,18 +3,18 @@ import { Server as SocketIOServer } from "socket.io";
 import { app } from "./app.js";
 import { connectDb } from "./config/db.js";
 import { env } from "./config/env.js";
-import { startCollabServer } from "./collab/hocuspocus.js";
+import { attachCollabServer } from "./collab/hocuspocus.js";
 import { setSocketServer } from "./realtime/socket.js";
 
 async function bootstrap() {
   await connectDb();
-  await startCollabServer();
 
   const allowedOrigins = Array.from(
     new Set([env.CLIENT_ORIGIN, ...env.CORS_ALLOWED_ORIGINS]),
   );
 
   const server = http.createServer(app);
+  attachCollabServer(server);
   const io = new SocketIOServer(server, {
     cors: {
       origin: allowedOrigins,
@@ -36,7 +36,7 @@ async function bootstrap() {
     // eslint-disable-next-line no-console
     console.log(`API server running on http://localhost:${env.PORT}`);
     // eslint-disable-next-line no-console
-    console.log(`Collab server running on ws://localhost:${env.COLLAB_PORT}`);
+    console.log(`Collab server running on ws://localhost:${env.PORT}/collab`);
     // eslint-disable-next-line no-console
     console.log(`[cors] allowed origins: ${origins.join(", ")}`);
     // eslint-disable-next-line no-console

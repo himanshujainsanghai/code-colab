@@ -286,8 +286,23 @@ export function EditorPage() {
 
   useEffect(() => {
     if (!projectId) return;
-    const apiBase = import.meta.env.VITE_API_URL ?? "http://localhost:4000/api";
-    const socketUrl = apiBase.replace(/\/api\/?$/, "");
+    const socketUrl = (() => {
+      const collabUrl = import.meta.env.VITE_COLLAB_URL as string | undefined;
+      if (collabUrl) {
+        try {
+          return new URL(collabUrl, window.location.origin).origin;
+        } catch {
+          // fall through
+        }
+      }
+
+      const apiBase = import.meta.env.VITE_API_URL ?? "http://localhost:4000/api";
+      try {
+        return new URL(apiBase, window.location.origin).origin;
+      } catch {
+        return window.location.origin;
+      }
+    })();
 
     const socket = io(socketUrl, {
       withCredentials: true,
@@ -334,7 +349,7 @@ export function EditorPage() {
     const fileId = activeFile.id;
     const doc = new Y.Doc();
     const provider = new HocuspocusProvider({
-      url: import.meta.env.VITE_COLLAB_URL ?? "ws://localhost:1234",
+      url: import.meta.env.VITE_COLLAB_URL ?? "ws://localhost:4000/collab",
       name: `project:${projectId}:file:${fileId}`,
       document: doc,
       token: null,

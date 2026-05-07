@@ -1,6 +1,7 @@
-import { Server } from "@hocuspocus/server";
+import { Hocuspocus } from "@hocuspocus/server";
+import type { IncomingMessage, Server as HttpServer } from "node:http";
+import { WebSocketServer } from "ws";
 import * as Y from "yjs";
-import { env } from "../config/env.js";
 import { FileNode } from "../models/FileNode.js";
 
 // ---------------------------------------------------------------------------
@@ -59,10 +60,8 @@ function repairRepeatedContent(content: string): string {
 // Collaboration server
 // ---------------------------------------------------------------------------
 
-export async function startCollabServer() {
-  const server = new Server({
-    port: env.COLLAB_PORT,
-
+function createCollabInstance() {
+  return new Hocuspocus({
     /**
      * Called once, when the FIRST client connects to a document room that has
      * no in-memory Yjs state (i.e. no other client is currently connected).
@@ -108,7 +107,29 @@ export async function startCollabServer() {
     //   When the last client disconnects, unsaved changes are intentionally lost
     //   (matching the "save explicitly" contract the UI communicates to the user).
   });
+}
 
-  await server.listen();
-  return server;
+export function attachCollabServer(server: HttpServer) {
+  const collab = createCollabInstance();
+  const wsServer = new WebSocketServer({ noServer: true });
+
+  wsServer.on("connection", (incoming, request) => {
+    incoming.setMaxListeners(Number.POSITIVE_INFINITY);
+    incoming.on("error", (error) => {
+      // eslint-disable-next-line no-console
+      console.error("Error emitted from collab websocket instance:", error);
+    });
+    collab.handleConnection(incoming, request as IncomingMessage);
+  });
+
+  server.on("upgrade", (request, socket, head) => {
+    const pathname = new URL(request.url ?? "/", "http://localhost").pathname;
+    if (pathname !== "/collab") return;
+
+    wsServer.handleUpgrade(request, socket, head, (ws) => {
+      wsServer.emit("connection", ws, request);
+    });
+  });
+
+  return collab;
 }
