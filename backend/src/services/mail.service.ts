@@ -1,84 +1,45 @@
-import dns from "node:dns";
-import nodemailer from "nodemailer";
 import { env } from "../config/env.js";
 
-// Many cloud runtimes still have no usable IPv6 egress.
-// Prefer IPv4 when resolving smtp.gmail.com to avoid ENETUNREACH on AAAA records.
-try {
-  dns.setDefaultResultOrder("ipv4first");
-} catch {
-  // Older Node versions may not support this API; ignore safely.
-}
+type ProxyMailPayload = {
+  to: string;
+  subject: string;
+  html: string;
+};
 
-/**
- * Singleton transporter.
- *
- * Key decisions:
- *  - port 465 + secure:true  → implicit TLS (SMTPS).
- *    Gmail blocks STARTTLS (port 587) connections from cloud/serverless IPs
- *    (Vercel, Railway …) because those address ranges are often flagged as
- *    potential spam sources.  Implicit TLS on 465 is always accepted.
- *  - tls.rejectUnauthorized: true  → keep certificate verification on; never
- *    disable this in production.
- *  - The transporter is built once and reused across all calls to avoid the
- *    overhead (and subtle connection-state bugs) of recreating it per request.
- */
-function createTransporter() {
-  if (!env.SMTP_HOST || !env.SMTP_USER || !env.SMTP_PASS) {
-    return null;
-  }
+const emailServiceTimeoutMs = 20_000;
 
-  const secure = env.SMTP_PORT === 465;
-
-  return nodemailer.createTransport({
-    host: env.SMTP_HOST,
-    port: env.SMTP_PORT,
-    // 465 uses implicit TLS, 587 uses STARTTLS.
-    secure,
-    auth: {
-      user: env.SMTP_USER,
-      pass: env.SMTP_PASS,
-    },
-    requireTLS: !secure,
-    connectionTimeout: 20_000,
-    greetingTimeout: 20_000,
-    socketTimeout: 30_000,
-    tls: {
-      rejectUnauthorized: true, // always validate the server certificate
-    },
-  });
-}
-
-// Build once at module load time so the TCP connection can be reused.
-const transporter = createTransporter();
-
-async function logSmtpHealthOnStartup() {
-  if (!transporter) {
-    console.warn("[mail] SMTP transporter is disabled: missing SMTP_HOST/SMTP_USER/SMTP_PASS.");
-    return;
-  }
-
-  try {
-    await transporter.verify();
-    console.log(
-      `[mail] SMTP transporter verified successfully (${env.SMTP_HOST}:${env.SMTP_PORT}).`,
-    );
-  } catch (error) {
-    console.error("[mail] SMTP transporter verification failed:", error);
-  }
-}
-
-void logSmtpHealthOnStartup();
-
-export async function sendResetPasswordMail(to: string, resetLink: string) {
-  if (!transporter) {
-    console.warn("[mail] SMTP credentials not configured – skipping reset-password email.");
+async function sendViaEmailService(payload: ProxyMailPayload) {
+  if (!env.EMAIL_SERVICE_URL) {
+    console.warn("[mail] EMAIL_SERVICE_URL is not configured; skipping email send.");
     return false;
   }
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), emailServiceTimeoutMs);
+  const endpoint = `${env.EMAIL_SERVICE_URL.replace(/\/$/, "")}/send`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...(env.EMAIL_SERVICE_API_KEY
+        ? { "x-email-service-key": env.EMAIL_SERVICE_API_KEY }
+        : {}),
+    },
+    body: JSON.stringify(payload),
+    signal: controller.signal,
+  }).finally(() => clearTimeout(timeout));
+
+  if (!response.ok) {
+    const raw = await response.text().catch(() => "");
+    throw new Error(`[mail] Email proxy failed (${response.status}): ${raw || response.statusText}`);
+  }
+
+  return true;
+}
+
+export async function sendResetPasswordMail(to: string, resetLink: string) {
   try {
-    await transporter.sendMail({
-      from: `"Colab Code" <${env.SMTP_USER}>`,
+    await sendViaEmailService({
       to,
       subject: "Reset your Colab Code password",
       html: `
@@ -107,14 +68,8 @@ export async function sendInvitationMail(input: {
   role: "viewer" | "editor" | "admin";
   inviteLink: string;
 }) {
-  if (!transporter) {
-    console.warn("[mail] SMTP credentials not configured – skipping invitation email.");
-    return false;
-  }
-
   try {
-    await transporter.sendMail({
-      from: `"Colab Code" <${env.SMTP_USER}>`,
+    await sendViaEmailService({
       to: input.to,
       subject: `Invitation to collaborate on ${input.projectName}`,
       html: `
