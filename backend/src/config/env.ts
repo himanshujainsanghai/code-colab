@@ -76,14 +76,12 @@ export const env = {
   AUTH_COOKIE_SECURE: authCookieSecure,
   JUDGE0_URL: process.env.JUDGE0_URL ?? "http://localhost:2358",
   JUDGE0_KEY: process.env.JUDGE0_KEY,
+  SMTP_HOST: process.env.SMTP_HOST,
+  SMTP_PORT: Number(process.env.SMTP_PORT ?? 465),
+  SMTP_USER: process.env.SMTP_USER,
+  SMTP_PASS: process.env.SMTP_PASS,
   REDIS_URL: process.env.REDIS_URL ?? "redis://127.0.0.1:6379",
   COLLAB_PORT: Number(process.env.COLLAB_PORT ?? 1234),
   HOST_RUNNER_ENABLED: (process.env.HOST_RUNNER_ENABLED ?? "true") === "true",
   HOST_RUN_TIMEOUT_MS: Number(process.env.HOST_RUN_TIMEOUT_MS ?? 6000),
-  // ── Mail (Resend HTTP API – works on all hosts including Render free tier) ──
-  // SMTP (ports 25/465/587) is blocked on Render free tier since Sep 2025.
-  // Resend uses HTTPS (port 443) and is never blocked.
-  // Sign up at https://resend.com, create an API key, and verify your domain.
-  RESEND_API_KEY: process.env.RESEND_API_KEY,
-  MAIL_FROM: process.env.MAIL_FROM ?? "Colab Code <onboarding@resend.dev>",
 };
