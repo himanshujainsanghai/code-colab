@@ -1,0 +1,17 @@
+{
+  "experimentalServices": {
+    "frontend": {
+      "entrypoint": "frontend",
+      "routePrefix": "/",
+      "framework": "vite"
+    },
+    "backend": {
+      "entrypoint": "backend",
+      "routePrefix": "/_/backend"
+    },
+    "email-service": {
+      "entrypoint": "email-service",
+      "routePrefix": "/_/email"
+    }
+  }
+}
