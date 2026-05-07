@@ -86,13 +86,23 @@ export async function createInvitation(request: Request, response: Response) {
   }
 
   const inviteLink = `${env.CLIENT_ORIGIN}/invite/accept?token=${invitation.token}`;
-  await sendInvitationMail({
-    to: invitedEmail,
-    projectName: project.name,
-    inviterName: inviter.username,
-    role: input.role,
-    inviteLink,
-  });
+  try {
+    await sendInvitationMail({
+      to: invitedEmail,
+      projectName: project.name,
+      inviterName: inviter.username,
+      role: input.role,
+      inviteLink,
+    });
+  } catch (error) {
+    // Mail delivery failure must NOT block the invitation — it's already persisted.
+    // The inviter can share the link manually if needed.
+    console.error("[invitation] Failed to send invitation email:", {
+      projectId,
+      invitedEmail,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 
   return response.status(201).json({
     data: {

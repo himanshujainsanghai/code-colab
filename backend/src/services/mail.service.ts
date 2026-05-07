@@ -1,87 +1,58 @@
-import dns from "node:dns";
-import nodemailer from "nodemailer";
+import { Resend } from "resend";
 import { env } from "../config/env.js";
 
-// Many cloud runtimes still have no usable IPv6 egress.
-// Prefer IPv4 when resolving smtp.gmail.com to avoid ENETUNREACH on AAAA records.
-try {
-  dns.setDefaultResultOrder("ipv4first");
-} catch {
-  // Older Node versions may not support this API; ignore safely.
-}
-
 /**
- * Singleton transporter.
- *
- * Key decisions:
- *  - port 465 + secure:true  → implicit TLS (SMTPS).
- *    Gmail blocks STARTTLS (port 587) connections from cloud/serverless IPs
- *    (Vercel, Railway …) because those address ranges are often flagged as
- *    potential spam sources.  Implicit TLS on 465 is always accepted.
- *  - tls.rejectUnauthorized: true  → keep certificate verification on; never
- *    disable this in production.
- *  - The transporter is built once and reused across all calls to avoid the
- *    overhead (and subtle connection-state bugs) of recreating it per request.
+ * Resend uses the HTTPS API (port 443) — never blocked by cloud firewalls.
+ * This replaces nodemailer/SMTP which is blocked on Render's free tier
+ * (ports 25, 465, 587 all blocked since September 2025).
  */
-function createTransporter() {
-  if (!env.SMTP_HOST || !env.SMTP_USER || !env.SMTP_PASS) {
+function createClient() {
+  if (!env.RESEND_API_KEY) {
     return null;
   }
-
-  const secure = env.SMTP_PORT === 465;
-
-  return nodemailer.createTransport({
-    host: env.SMTP_HOST,
-    port: env.SMTP_PORT,
-    // 465 uses implicit TLS, 587 uses STARTTLS.
-    secure,
-    auth: {
-      user: env.SMTP_USER,
-      pass: env.SMTP_PASS,
-    },
-    requireTLS: !secure,
-    connectionTimeout: 20_000,
-    greetingTimeout: 20_000,
-    socketTimeout: 30_000,
-    tls: {
-      rejectUnauthorized: true, // always validate the server certificate
-    },
-  });
+  return new Resend(env.RESEND_API_KEY);
 }
 
-// Build once at module load time so the TCP connection can be reused.
-const transporter = createTransporter();
+const client = createClient();
 
-async function logSmtpHealthOnStartup() {
-  if (!transporter) {
-    console.warn("[mail] SMTP transporter is disabled: missing SMTP_HOST/SMTP_USER/SMTP_PASS.");
+async function logMailHealthOnStartup() {
+  if (!client) {
+    console.warn("[mail] Resend client is disabled: RESEND_API_KEY is not set.");
     return;
   }
 
-  try {
-    await transporter.verify();
-    console.log(
-      `[mail] SMTP transporter verified successfully (${env.SMTP_HOST}:${env.SMTP_PORT}).`,
+  // Warn loudly if the sender address is still the Resend test address.
+  // onboarding@resend.dev only works with Resend test recipients — it will
+  // reject every real email address in production.
+  if (env.MAIL_FROM.includes("onboarding@resend.dev")) {
+    console.error(
+      "[mail] MAIL_FROM is still set to the Resend test address (onboarding@resend.dev). " +
+      "Emails to real users WILL fail. Set MAIL_FROM to an address on your verified domain.",
     );
-  } catch (error) {
-    console.error("[mail] SMTP transporter verification failed:", error);
+  }
+
+  // Hitting the domains list is a lightweight API connectivity check.
+  const { error } = await client.domains.list();
+  if (error) {
+    console.error("[mail] Resend connectivity check failed:", error);
+  } else {
+    console.log(`[mail] Resend client ready — sending from: ${env.MAIL_FROM}`);
   }
 }
 
-void logSmtpHealthOnStartup();
+void logMailHealthOnStartup();
 
 export async function sendResetPasswordMail(to: string, resetLink: string) {
-  if (!transporter) {
-    console.warn("[mail] SMTP credentials not configured – skipping reset-password email.");
+  if (!client) {
+    console.warn("[mail] Resend not configured – skipping reset-password email.");
     return false;
   }
 
-  try {
-    await transporter.sendMail({
-      from: `"Colab Code" <${env.SMTP_USER}>`,
-      to,
-      subject: "Reset your Colab Code password",
-      html: `
+  const { data, error } = await client.emails.send({
+    from: env.MAIL_FROM,
+    to,
+    subject: "Reset your Colab Code password",
+    html: `
       <p>You requested a password reset for your Colab Code account.</p>
       <p>
         <a href="${resetLink}" style="display:inline-block;padding:10px 20px;background:#007acc;color:#fff;text-decoration:none;border-radius:6px;">
@@ -92,12 +63,15 @@ export async function sendResetPasswordMail(to: string, resetLink: string) {
       <p><a href="${resetLink}">${resetLink}</a></p>
       <p>This link expires in 15 minutes. If you didn't request a reset, you can safely ignore this email.</p>
     `,
-    });
-    return true;
-  } catch (error) {
+  });
+
+  if (error) {
     console.error("[mail] Failed to send reset-password email:", error);
-    throw error;
+    throw new Error(error.message);
   }
+
+  console.log("[mail] Reset-password email sent, id:", data?.id);
+  return true;
 }
 
 export async function sendInvitationMail(input: {
@@ -107,17 +81,16 @@ export async function sendInvitationMail(input: {
   role: "viewer" | "editor" | "admin";
   inviteLink: string;
 }) {
-  if (!transporter) {
-    console.warn("[mail] SMTP credentials not configured – skipping invitation email.");
+  if (!client) {
+    console.warn("[mail] Resend not configured – skipping invitation email.");
     return false;
   }
 
-  try {
-    await transporter.sendMail({
-      from: `"Colab Code" <${env.SMTP_USER}>`,
-      to: input.to,
-      subject: `Invitation to collaborate on ${input.projectName}`,
-      html: `
+  const { data, error } = await client.emails.send({
+    from: env.MAIL_FROM,
+    to: input.to,
+    subject: `Invitation to collaborate on ${input.projectName}`,
+    html: `
       <p><strong>${input.inviterName}</strong> invited you to collaborate on <strong>${input.projectName}</strong>.</p>
       <p>Your role: <strong>${input.role}</strong></p>
       <p>
@@ -128,10 +101,13 @@ export async function sendInvitationMail(input: {
       <p>If the button does not work, use this link:</p>
       <p><a href="${input.inviteLink}">${input.inviteLink}</a></p>
     `,
-    });
-    return true;
-  } catch (error) {
+  });
+
+  if (error) {
     console.error("[mail] Failed to send invitation email:", error);
-    throw error;
+    throw new Error(error.message);
   }
+
+  console.log("[mail] Invitation email sent, id:", data?.id);
+  return true;
 }
